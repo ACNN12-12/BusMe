@@ -11,36 +11,43 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Скачиваем код (обновлено до v4)
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
+      # 2. Устанавливаем Java (обновлено до v4)
       - name: Set up JDK 17
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
 
+      # 3. Устанавливаем Flutter
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.x'
           channel: 'stable'
 
+      # 4. Генерируем служебные файлы Android
       - name: Generate Android project files
         run: flutter create --platforms=android .
 
+      # 5. Скачиваем библиотеки
       - name: Install dependencies
         run: flutter pub get
 
-      # Добавленный шаг: генерация иконки приложения перед сборкой
+      # 6. Генерация иконки приложения
       - name: Generate launcher icons
         run: flutter pub run flutter_launcher_icons
 
+      # 7. Собираем готовый APK-файл
       - name: Build APK
         run: flutter build apk --release
 
+      # 8. Выкладываем готовый APK в архив (обновлено до v4)
       - name: Upload APK Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: BusMe-Release-APK
           path: build/app/outputs/flutter-apk/app-release.apk
