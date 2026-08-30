@@ -10,20 +10,20 @@ class Departure {
   final String id;
   final String time;
   final int stopOffsetMinutes;
-  final String dayType; // 'daily', 'weekdays', 'weekends'
+  final String routeNumber; // Новое поле для номера/имени маршрута
 
   Departure({
     required this.id,
     required this.time,
     required this.stopOffsetMinutes,
-    this.dayType = 'daily',
+    this.routeNumber = "",
   });
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'time': time,
         'stopOffsetMinutes': stopOffsetMinutes,
-        'dayType': dayType,
+        'routeNumber': routeNumber,
       };
 
   factory Departure.fromJson(Map<String, dynamic> json) {
@@ -31,7 +31,20 @@ class Departure {
       id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
       time: json['time'] ?? "08:00",
       stopOffsetMinutes: json['stopOffsetMinutes'] ?? 0,
-      dayType: json['dayType'] ?? 'daily',
+      routeNumber: json['routeNumber'] ?? "",
+    );
+  }
+
+  Departure copyWith({
+    String? time,
+    int? stopOffsetMinutes,
+    String? routeNumber,
+  }) {
+    return Departure(
+      id: this.id,
+      time: time ?? this.time,
+      stopOffsetMinutes: stopOffsetMinutes ?? this.stopOffsetMinutes,
+      routeNumber: routeNumber ?? this.routeNumber,
     );
   }
 }
@@ -80,10 +93,12 @@ class AppState extends ChangeNotifier {
   List<BusPoint> _points = [];
   ThemeMode _themeMode = ThemeMode.system;
   double _fontSizeScale = 1.0;
+  bool _hidePastDepartures = false; // Состояние автоскрытия прошедших рейсов
 
   List<BusPoint> get points => _points;
   ThemeMode get themeMode => _themeMode;
   double get fontSizeScale => _fontSizeScale;
+  bool get hidePastDepartures => _hidePastDepartures;
 
   AppState() { _loadData(); }
 
@@ -92,6 +107,7 @@ class AppState extends ChangeNotifier {
     final themeStr = prefs.getString('themeMode') ?? 'system';
     _themeMode = ThemeMode.values.firstWhere((e) => e.toString().split('.').last == themeStr, orElse: () => ThemeMode.system);
     _fontSizeScale = prefs.getDouble('fontSizeScale') ?? 1.0;
+    _hidePastDepartures = prefs.getBool('hidePastDepartures') ?? false;
     
     final pointsJson = prefs.getString('pointsData');
     if (pointsJson != null) {
@@ -108,6 +124,7 @@ class AppState extends ChangeNotifier {
     await prefs.setString('pointsData', jsonEncode(_points.map((p) => p.toJson()).toList()));
     await prefs.setString('themeMode', _themeMode.toString().split('.').last);
     await prefs.setDouble('fontSizeScale', _fontSizeScale);
+    await prefs.setBool('hidePastDepartures', _hidePastDepartures);
   }
 
   BusPoint? getActivePoint() {
@@ -175,20 +192,39 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void addDeparture(String pointId, String time, int stopOffset, String dayType) {
+  void addDeparture(String pointId, String time, int stopOffset, String routeNumber) {
     final index = _points.indexWhere((p) => p.id == pointId);
     if (index != -1) {
       final list = List<Departure>.from(_points[index].departures);
       list.add(Departure(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        time: time,
+        id: DateTime.now().millisecondsSinceEpoch.toString(), 
+        time: time, 
         stopOffsetMinutes: stopOffset,
-        dayType: dayType,
+        routeNumber: routeNumber,
       ));
       list.sort((a, b) => a.time.compareTo(b.time));
       _points[index] = _points[index].copyWith(departures: list);
       _saveData();
       notifyListeners();
+    }
+  }
+
+  void updateDeparture(String pointId, String departureId, String time, int stopOffset, String routeNumber) {
+    final index = _points.indexWhere((p) => p.id == pointId);
+    if (index != -1) {
+      final list = List<Departure>.from(_points[index].departures);
+      final depIndex = list.indexWhere((d) => d.id == departureId);
+      if (depIndex != -1) {
+        list[depIndex] = list[depIndex].copyWith(
+          time: time,
+          stopOffsetMinutes: stopOffset,
+          routeNumber: routeNumber,
+        );
+        list.sort((a, b) => a.time.compareTo(b.time));
+        _points[index] = _points[index].copyWith(departures: list);
+        _saveData();
+        notifyListeners();
+      }
     }
   }
 
@@ -205,8 +241,13 @@ class AppState extends ChangeNotifier {
 
   void setThemeMode(ThemeMode mode) { _themeMode = mode; _saveData(); notifyListeners(); }
   void setFontSizeScale(double scale) { _fontSizeScale = scale; _saveData(); notifyListeners(); }
+  void setHidePastDepartures(bool value) { _hidePastDepartures = value; _saveData(); notifyListeners(); }
 
-  String exportToJson() => jsonEncode({'points': _points.map((p) => p.toJson()).toList(), 'fontSizeScale': _fontSizeScale});
+  String exportToJson() => jsonEncode({
+    'points': _points.map((p) => p.toJson()).toList(), 
+    'fontSizeScale': _fontSizeScale,
+    'hidePastDepartures': _hidePastDepartures,
+  });
   
   bool importFromJson(String jsonStr) {
     try {
@@ -214,6 +255,7 @@ class AppState extends ChangeNotifier {
       if (decoded['points'] != null) {
         _points = (decoded['points'] as List).map((item) => BusPoint.fromJson(item)).toList();
         _fontSizeScale = (decoded['fontSizeScale'] ?? 1.0).toDouble();
+        _hidePastDepartures = decoded['hidePastDepartures'] ?? false;
         _saveData();
         notifyListeners();
         return true;
@@ -318,81 +360,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 }
 
-// --- ВИДЖЕТ: ПУЛЬСИРУЮЩАЯ СВЕТОДИОДНАЯ ТОЧКА ---
-class PulsingLiveDot extends StatefulWidget {
-  const PulsingLiveDot({super.key});
-
-  @override
-  State<PulsingLiveDot> createState() => _PulsingLiveDotState();
-}
-
-class _PulsingLiveDotState extends State<PulsingLiveDot> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: Tween<double>(begin: 0.3, end: 1.0).animate(_controller),
-      child: Container(
-        width: 8,
-        height: 8,
-        margin: const EdgeInsets.only(right: 6.0),
-        decoration: const BoxDecoration(
-          color: Colors.green,
-          shape: BoxShape.circle,
-        ),
-      ),
-    );
-  }
-}
-
-// --- ВИДЖЕТ: ОФОРМЛЕНИЕ ПУСТЫХ ЭКРАНОВ ---
-class EmptyStateView extends StatelessWidget {
-  final IconData icon;
-  final String text;
-
-  const EmptyStateView({super.key, required this.icon, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Center(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 64, color: colors.onSurfaceVariant.withOpacity(0.3)),
-          const SizedBox(height: 16.0),
-          Text(
-            text,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 16,
-              color: colors.onSurfaceVariant.withOpacity(0.7),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // --- ВКЛАДКА 1: РАСПИСАНИЕ ---
 class ScheduleTab extends StatefulWidget {
   const ScheduleTab({super.key});
@@ -402,6 +369,7 @@ class ScheduleTab extends StatefulWidget {
 
 class _ScheduleTabState extends State<ScheduleTab> {
   String? _selectedPointId;
+  String? _selectedRouteFilter; // Хранит выбранный фильтр маршрута (null - Все)
   late Stream<DateTime> _timeStream;
 
   @override
@@ -417,31 +385,36 @@ class _ScheduleTabState extends State<ScheduleTab> {
     return DateTime(now.year, now.month, now.day, hour, minute).add(Duration(minutes: offsetMinutes));
   }
 
-  bool _isDepartureActiveToday(String dayType, int weekday) {
-    if (dayType == 'daily') return true;
-    if (dayType == 'weekdays') return weekday >= 1 && weekday <= 5;
-    if (dayType == 'weekends') return weekday >= 6 && weekday <= 7;
-    return true;
-  }
-
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
     
     if (appState.points.isEmpty) {
-      return const EmptyStateView(
-        icon: Icons.directions_bus_outlined,
-        text: "Нет добавленных пунктов.\nПерейдите во вкладку «Пункты», чтобы создать первый.",
-      );
+      return const Center(child: Text("Нет пунктов.\nДобавьте их во вкладке «Пункты»", textAlign: TextAlign.center));
     }
 
     final activePoint = appState.getActivePoint();
+    
     final currentPoint = _selectedPointId != null
         ? appState.points.firstWhere((p) => p.id == _selectedPointId, orElse: () => activePoint ?? appState.points.first)
         : (activePoint ?? appState.points.first);
 
+    // Получаем уникальные маршруты для построения быстрых фильтров на экране
+    final routes = currentPoint.departures
+        .map((d) => d.routeNumber.trim())
+        .where((r) => r.isNotEmpty)
+        .toSet()
+        .toList();
+    routes.sort();
+
+    // Защита от зависания несуществующего фильтра при смене пунктов
+    if (_selectedRouteFilter != null && !routes.contains(_selectedRouteFilter)) {
+      _selectedRouteFilter = null;
+    }
+
     return Column(
       children: [
+        // Горизонтальный список пунктов
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -456,6 +429,7 @@ class _ScheduleTabState extends State<ScheduleTab> {
                   onSelected: (selected) {
                     setState(() {
                       _selectedPointId = selected ? point.id : null;
+                      _selectedRouteFilter = null; // Сбрасываем фильтр маршрута при смене пункта
                     });
                   },
                 ),
@@ -463,83 +437,131 @@ class _ScheduleTabState extends State<ScheduleTab> {
             }).toList(),
           ),
         ),
-        Expanded(
-          child: StreamBuilder<DateTime>(
-            stream: _timeStream,
-            builder: (context, snapshot) {
-              final now = snapshot.data ?? DateTime.now();
-              
-              // Фильтрация рейсов по дню недели (Будни / Выходные)
-              final departures = currentPoint.departures
-                  .where((dep) => _isDepartureActiveToday(dep.dayType, now.weekday))
-                  .toList();
 
-              if (departures.isEmpty) {
-                return const EmptyStateView(
-                  icon: Icons.event_busy_outlined,
-                  text: "На сегодня в этом пункте рейсов нет.",
-                );
-              }
-
-              Departure? nearestDep;
-              int minDiff = 999999;
-
-              for (var dep in departures) {
-                final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
-                final truncatedNow = DateTime(now.year, now.month, now.day, now.hour, now.minute);
-                
-                int diff;
-                if (scheduledToday.isBefore(truncatedNow)) {
-                  final scheduledTomorrow = scheduledToday.add(const Duration(days: 1));
-                  diff = scheduledTomorrow.difference(truncatedNow).inMinutes;
-                } else {
-                  diff = scheduledToday.difference(truncatedNow).inMinutes;
-                }
-
-                if (diff >= 0 && diff < minDiff) {
-                  minDiff = diff;
-                  nearestDep = dep;
-                }
-              }
-
-              return ListView.builder(
-                padding: const EdgeInsets.all(16.0),
-                itemCount: departures.length,
-                itemBuilder: (context, index) {
-                  final dep = departures[index];
-                  final isNearest = nearestDep != null && nearestDep.id == dep.id;
-                  return _buildDeparturePill(context, dep, isNearest, now, appState.fontSizeScale);
-                },
-              );
-            },
+        // Горизонтальный список маршрутов (Вариант Б) - показывается только если есть маршруты
+        if (routes.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8.0),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Row(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6.0),
+                    child: ChoiceChip(
+                      label: const Text("Все маршруты"),
+                      selected: _selectedRouteFilter == null,
+                      onSelected: (selected) {
+                        if (selected) setState(() => _selectedRouteFilter = null);
+                      },
+                    ),
+                  ),
+                  ...routes.map((route) {
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 6.0),
+                      child: ChoiceChip(
+                        label: Text("Маршрут $route"),
+                        selected: _selectedRouteFilter == route,
+                        onSelected: (selected) {
+                          setState(() {
+                            _selectedRouteFilter = selected ? route : null;
+                          });
+                        },
+                      ),
+                    );
+                  }).toList(),
+                ],
+              ),
+            ),
           ),
+
+        // Список рейсов
+        Expanded(
+          child: currentPoint.departures.isEmpty
+              ? const Center(child: Text("В этом пункте нет отправлений"))
+              : StreamBuilder<DateTime>(
+                  stream: _timeStream,
+                  builder: (context, snapshot) {
+                    final now = snapshot.data ?? DateTime.now();
+                    final departures = currentPoint.departures;
+
+                    // 1. Фильтруем по выбранному маршруту
+                    var filteredDeps = departures;
+                    if (_selectedRouteFilter != null) {
+                      filteredDeps = filteredDeps.where((d) => d.routeNumber == _selectedRouteFilter).toList();
+                    }
+
+                    // 2. Рассчитываем признак прошедшего времени для каждого рейса
+                    final List<MapEntry<Departure, bool>> depsWithPastStatus = [];
+                    for (var dep in filteredDeps) {
+                      final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
+                      final truncatedNow = DateTime(now.year, now.month, now.day, now.hour, now.minute);
+                      final bool isPast = scheduledToday.isBefore(truncatedNow);
+                      depsWithPastStatus.add(MapEntry(dep, isPast));
+                    }
+
+                    // 3. Скрываем прошедшие рейсы, если опция включена (Вариант В)
+                    var displayDeps = depsWithPastStatus;
+                    if (appState.hidePastDepartures) {
+                      displayDeps = displayDeps.where((entry) => !entry.value).toList();
+                    }
+
+                    if (displayDeps.isEmpty) {
+                      return const Center(child: Text("Нет подходящих предстоящих рейсов"));
+                    }
+
+                    // 4. Поиск ближайшего рейса среди отображаемых
+                    Departure? nearestDep;
+                    int minDiff = 999999;
+
+                    for (var entry in displayDeps) {
+                      final dep = entry.key;
+                      final isPast = entry.value;
+                      if (isPast) continue;
+
+                      final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
+                      final truncatedNow = DateTime(now.year, now.month, now.day, now.hour, now.minute);
+                      final diff = scheduledToday.difference(truncatedNow).inMinutes;
+
+                      if (diff >= 0 && diff < minDiff) {
+                        minDiff = diff;
+                        nearestDep = dep;
+                      }
+                    }
+
+                    return ListView.builder(
+                      padding: const EdgeInsets.all(16.0),
+                      itemCount: displayDeps.length,
+                      itemBuilder: (context, index) {
+                        final dep = displayDeps[index].key;
+                        final isPast = displayDeps[index].value;
+                        final isNearest = nearestDep != null && nearestDep.id == dep.id;
+                        return _buildDeparturePill(context, dep, isNearest, isPast, now, appState.fontSizeScale);
+                      },
+                    );
+                  },
+                ),
         ),
       ],
     );
   }
 
-  Widget _buildDeparturePill(BuildContext context, Departure dep, bool isNearest, DateTime now, double fontScale) {
+  Widget _buildDeparturePill(BuildContext context, Departure dep, bool isNearest, bool isPast, DateTime now, double fontScale) {
     final colorScheme = Theme.of(context).colorScheme;
     final stopTimeStr = _calculateStopTime(dep.time, dep.stopOffsetMinutes);
-    
-    final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
-    final truncatedNow = DateTime(now.year, now.month, now.day, now.hour, now.minute);
-    
-    final bool isPast = scheduledToday.isBefore(truncatedNow);
     String countdownText = "";
 
     if (isPast) {
       countdownText = "завтра в: ${dep.time}";
     } else {
+      final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
+      final truncatedNow = DateTime(now.year, now.month, now.day, now.hour, now.minute);
       final diffInMinutes = scheduledToday.difference(truncatedNow).inMinutes;
       final hours = diffInMinutes ~/ 60;
       final minutes = diffInMinutes % 60;
       countdownText = hours > 0 ? "осталось: ${hours}ч ${minutes}м" : "осталось: $minutes мин";
     }
-
-    String dayTypeLabel = "";
-    if (dep.dayType == 'weekdays') dayTypeLabel = " • Будни";
-    if (dep.dayType == 'weekends') dayTypeLabel = " • Выходные";
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
@@ -560,7 +582,25 @@ class _ScheduleTabState extends State<ScheduleTab> {
             children: [
               Row(
                 children: [
-                  if (isNearest && !isPast) const PulsingLiveDot(),
+                  // Визуальный бейдж с номером маршрута (буквы и цифры)
+                  if (dep.routeNumber.isNotEmpty) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                      decoration: BoxDecoration(
+                        color: isNearest ? colorScheme.primary : colorScheme.outline.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(8.0),
+                      ),
+                      child: Text(
+                        dep.routeNumber,
+                        style: TextStyle(
+                          fontSize: 13.0 * fontScale,
+                          fontWeight: FontWeight.bold,
+                          color: isNearest ? colorScheme.onPrimary : colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8.0),
+                  ],
                   Text(
                     dep.time,
                     style: TextStyle(
@@ -584,23 +624,22 @@ class _ScheduleTabState extends State<ScheduleTab> {
             ],
           ),
           const SizedBox(height: 4.0),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  dep.stopOffsetMinutes > 0
-                      ? "на остановке в: $stopTimeStr (+${dep.stopOffsetMinutes} мин)$dayTypeLabel"
-                      : "без заезда на остановку$dayTypeLabel",
-                  style: TextStyle(
-                    fontSize: 14.0 * fontScale, 
-                    color: isNearest 
-                        ? colorScheme.onPrimaryContainer.withOpacity(0.8) 
-                        : colorScheme.onSurfaceVariant.withOpacity(0.7)
-                  ),
-                ),
-              ),
-            ],
-          ),
+          if (dep.stopOffsetMinutes > 0)
+            Text(
+              "на остановке в: $stopTimeStr (+${dep.stopOffsetMinutes} мин)", 
+              style: TextStyle(
+                fontSize: 14.0 * fontScale, 
+                color: isNearest ? colorScheme.onPrimaryContainer.withOpacity(0.8) : colorScheme.onSurfaceVariant.withOpacity(0.7)
+              )
+            )
+          else
+            Text(
+              "без заезда на остановку", 
+              style: TextStyle(
+                fontSize: 14.0 * fontScale, 
+                color: colorScheme.onSurfaceVariant.withOpacity(0.5)
+              )
+            ),
         ],
       ),
     );
@@ -623,10 +662,7 @@ class ManagePointsTab extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text("Управление пунктами"), centerTitle: true),
       body: appState.points.isEmpty
-          ? const EmptyStateView(
-              icon: Icons.edit_location_alt_outlined,
-              text: "У вас нет добавленных пунктов.\nНажмите «+», чтобы создать пункт.",
-            )
+          ? const Center(child: Text("Список пунктов пуст"))
           : ReorderableListView.builder(
               itemCount: appState.points.length,
               onReorder: appState.reorderPoints,
@@ -673,7 +709,6 @@ class ManagePointsTab extends StatelessWidget {
                 TextField(controller: nameController, decoration: const InputDecoration(labelText: "Название пункта")),
                 const SizedBox(height: 16.0),
                 const Text("Приоритет по времени (необязательно):", style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8.0),
                 Row(
                   children: [
                     Expanded(child: OutlinedButton(
@@ -733,14 +768,6 @@ class EditDeparturesScreen extends StatelessWidget {
   final BusPoint point;
   const EditDeparturesScreen({super.key, required this.point});
 
-  String _getDayTypeDisplay(String dayType) {
-    switch (dayType) {
-      case 'weekdays': return "По будням";
-      case 'weekends': return "По выходным";
-      default: return "Ежедневно";
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
@@ -749,10 +776,7 @@ class EditDeparturesScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(currentPoint.name)),
       body: currentPoint.departures.isEmpty
-          ? const EmptyStateView(
-              icon: Icons.more_time_outlined,
-              text: "Здесь пока нет рейсов.\nДобавьте первый рейс с помощью кнопки «+».",
-            )
+          ? const Center(child: Text("Нет рейсов. Добавьте первый рейс кнопкой +"))
           : ListView.builder(
               itemCount: currentPoint.departures.length,
               itemBuilder: (context, index) {
@@ -760,43 +784,58 @@ class EditDeparturesScreen extends StatelessWidget {
                 return Card(
                   margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
                   child: ListTile(
-                    title: Text("Отправление с АС: ${dep.time}", style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text(
-                      "${dep.stopOffsetMinutes > 0 ? 'Остановка: +${dep.stopOffsetMinutes} мин' : 'Без заезда'} • ${_getDayTypeDisplay(dep.dayType)}",
+                    title: Text(
+                      "${dep.routeNumber.isNotEmpty ? '[${dep.routeNumber}] ' : ''}Отправление с АС: ${dep.time}", 
+                      style: const TextStyle(fontWeight: FontWeight.bold)
                     ),
+                    subtitle: dep.stopOffsetMinutes > 0 ? Text("Остановка через: +${dep.stopOffsetMinutes} мин") : const Text("Без остановки"),
                     trailing: IconButton(
                       icon: const Icon(Icons.delete, color: Colors.red),
                       onPressed: () => context.read<AppState>().deleteDeparture(currentPoint.id, dep.id),
                     ),
+                    onTap: () => _showDepartureDialog(context, currentPoint.id, dep), // Вызов диалога для редактирования
                   ),
                 );
               },
             ),
-      floatingActionButton: FloatingActionButton(onPressed: () => _showAddDepartureDialog(context, currentPoint.id), child: const Icon(Icons.add)),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showDepartureDialog(context, currentPoint.id, null), 
+        child: const Icon(Icons.add)
+      ),
     );
   }
 
-  void _showAddDepartureDialog(BuildContext context, String pointId) {
-    String? selectedTime;
-    String selectedDayType = 'daily';
-    final offsetController = TextEditingController(text: "0");
+  // Объединенный диалог для добавления и редактирования рейсов
+  void _showDepartureDialog(BuildContext context, String pointId, [Departure? existingDep]) {
+    String? selectedTime = existingDep?.time;
+    final offsetController = TextEditingController(text: existingDep?.stopOffsetMinutes.toString() ?? "0");
+    final routeController = TextEditingController(text: existingDep?.routeNumber ?? "");
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setStateDialog) => AlertDialog(
-          title: const Text("Добавить рейс"),
+          title: Text(existingDep == null ? "Добавить рейс" : "Редактировать рейс"),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 ElevatedButton.icon(
                   icon: const Icon(Icons.access_time),
-                  label: Text(selectedTime != null ? "Отправление: $selectedTime" : "Выбрать время"),
+                  label: Text(selectedTime != null ? "Отправление: $selectedTime" : "Выбрать время отправления"),
                   onPressed: () async {
                     final res = await pickTime(context, selectedTime);
                     if (res != null) setStateDialog(() => selectedTime = res);
                   },
+                ),
+                const SizedBox(height: 16.0),
+                TextField(
+                  controller: routeController,
+                  decoration: const InputDecoration(
+                    labelText: "Номер/Имя маршрута (например: 34, А-Д)",
+                    hintText: "Необязательно",
+                  ),
+                  textCapitalization: TextCapitalization.characters,
                 ),
                 const SizedBox(height: 16.0),
                 TextField(
@@ -805,22 +844,6 @@ class EditDeparturesScreen extends StatelessWidget {
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 ),
-                const SizedBox(height: 16.0),
-                const Text("Периодичность рейса:", style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8.0),
-                SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'daily', label: Text('Все дни'), icon: Icon(Icons.calendar_today_outlined)),
-                    ButtonSegment(value: 'weekdays', label: Text('Будни'), icon: Icon(Icons.work_outline)),
-                    ButtonSegment(value: 'weekends', label: Text('Вых.'), icon: Icon(Icons.beach_access_outlined)),
-                  ],
-                  selected: {selectedDayType},
-                  onSelectionChanged: (Set<String> newSelection) {
-                    setStateDialog(() {
-                      selectedDayType = newSelection.first;
-                    });
-                  },
-                )
               ],
             ),
           ),
@@ -829,12 +852,17 @@ class EditDeparturesScreen extends StatelessWidget {
             ElevatedButton(
               onPressed: () {
                 final offset = int.tryParse(offsetController.text.trim()) ?? 0;
+                final route = routeController.text.trim();
                 if (selectedTime != null) {
-                  context.read<AppState>().addDeparture(pointId, selectedTime!, offset, selectedDayType);
+                  if (existingDep == null) {
+                    context.read<AppState>().addDeparture(pointId, selectedTime!, offset, route);
+                  } else {
+                    context.read<AppState>().updateDeparture(pointId, existingDep.id, selectedTime!, offset, route);
+                  }
                   Navigator.pop(context);
                 }
               },
-              child: const Text("Добавить"),
+              child: Text(existingDep == null ? "Добавить" : "Сохранить"),
             ),
           ],
         ),
@@ -846,7 +874,6 @@ class EditDeparturesScreen extends StatelessWidget {
 // --- ВКЛАДКА 3: НАСТРОЙКИ ---
 class SettingsTab extends StatelessWidget {
   const SettingsTab({super.key});
-
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
@@ -877,117 +904,46 @@ class SettingsTab extends StatelessWidget {
           ),
         ),
         const Divider(height: 32.0),
+        const Text("Поведение расписания", style: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold)),
+        SwitchListTile(
+          title: const Text("Скрывать ушедшие рейсы"),
+          subtitle: const Text("Оставляет в списке только предстоящие рейсы, автоматически убирая прошедшие до завтрашнего дня"),
+          value: appState.hidePastDepartures,
+          onChanged: (val) => appState.setHidePastDepartures(val),
+        ),
+        const Divider(height: 32.0),
         const Text("Резервное копирование", style: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8.0),
         ElevatedButton.icon(
           onPressed: () {
-            final jsonStr = appState.exportToJson();
-            showDialog(
-              context: context, 
-              builder: (context) => AlertDialog(
-                title: const Text("Экспорт настроек"),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text("JSON данные для резервного копирования:"),
-                    const SizedBox(height: 8.0),
-                    Container(
-                      maxHeight: 150,
-                      width: double.maxFinite,
-                      padding: const EdgeInsets.all(8.0),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
-                        borderRadius: BorderRadius.circular(8.0),
-                      ),
-                      child: SingleChildScrollView(
-                        child: SelectableText(
-                          jsonStr, 
-                          style: const TextStyle(fontFamily: 'monospace', fontSize: 11.0)
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                actions: [
-                  TextButton.icon(
-                    icon: const Icon(Icons.copy),
-                    label: const Text("Скопировать в буфер"),
-                    onPressed: () {
-                      Clipboard.setData(ClipboardData(text: jsonStr));
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("Данные скопированы в буфер обмена")),
-                      );
-                    },
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(context), 
-                    child: const Text("Закрыть")
-                  ),
-                ],
-              ),
-            );
+            showDialog(context: context, builder: (context) => AlertDialog(
+              title: const Text("Экспорт настроек"),
+              content: SelectableText(appState.exportToJson(), style: const TextStyle(fontFamily: 'monospace', fontSize: 12.0)),
+            ));
           },
-          icon: const Icon(Icons.download), 
-          label: const Text("Экспорт в JSON"),
+          icon: const Icon(Icons.download), label: const Text("Экспорт в JSON"),
         ),
         ElevatedButton.icon(
           onPressed: () {
-            showDialog(
-              context: context, 
-              builder: (context) => StatefulBuilder(
-                builder: (context, setStateDialog) => AlertDialog(
-                  title: const Text("Импорт настроек"),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextField(
-                        controller: jsonController, 
-                        maxLines: 5,
-                        decoration: const InputDecoration(
-                          hintText: "Вставьте JSON код...",
-                          border: OutlineInputBorder(),
-                        ),
+            showDialog(context: context, builder: (context) => AlertDialog(
+              title: const Text("Импорт настроек"),
+              content: TextField(controller: jsonController, maxLines: 5),
+              actions: [
+                ElevatedButton(
+                  onPressed: () {
+                    final success = appState.importFromJson(jsonController.text.trim());
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success ? "Данные успешно импортированы" : "Ошибка импорта. Проверьте формат JSON"),
                       ),
-                      const SizedBox(height: 8.0),
-                      TextButton.icon(
-                        icon: const Icon(Icons.paste),
-                        label: const Text("Вставить из буфера"),
-                        onPressed: () async {
-                          final data = await Clipboard.getData(Clipboard.kTextPlain);
-                          if (data != null && data.text != null) {
-                            setStateDialog(() {
-                              jsonController.text = data.text!;
-                            });
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context), 
-                      child: const Text("Отмена")
-                    ),
-                    ElevatedButton(
-                      onPressed: () {
-                        final success = appState.importFromJson(jsonController.text.trim());
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(success ? "Данные успешно импортированы" : "Ошибка импорта. Проверьте формат JSON"),
-                          ),
-                        );
-                      },
-                      child: const Text("Импортировать"),
-                    ),
-                  ],
+                    );
+                  },
+                  child: const Text("Импортировать"),
                 ),
-              ),
-            );
+              ],
+            ));
           },
-          icon: const Icon(Icons.upload), 
-          label: const Text("Импорт из JSON"),
+          icon: const Icon(Icons.upload), label: const Text("Импорт из JSON"),
         ),
       ],
     );
