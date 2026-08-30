@@ -10,16 +10,28 @@ class Departure {
   final String id;
   final String time;
   final int stopOffsetMinutes;
+  final String dayType; // 'daily', 'weekdays', 'weekends'
 
-  Departure({required this.id, required this.time, required this.stopOffsetMinutes});
+  Departure({
+    required this.id,
+    required this.time,
+    required this.stopOffsetMinutes,
+    this.dayType = 'daily',
+  });
 
-  Map<String, dynamic> toJson() => {'id': id, 'time': time, 'stopOffsetMinutes': stopOffsetMinutes};
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'time': time,
+        'stopOffsetMinutes': stopOffsetMinutes,
+        'dayType': dayType,
+      };
 
   factory Departure.fromJson(Map<String, dynamic> json) {
     return Departure(
       id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
       time: json['time'] ?? "08:00",
       stopOffsetMinutes: json['stopOffsetMinutes'] ?? 0,
+      dayType: json['dayType'] ?? 'daily',
     );
   }
 }
@@ -103,7 +115,6 @@ class AppState extends ChangeNotifier {
     final now = DateTime.now();
     final currentMinutes = now.hour * 60 + now.minute;
 
-    // 1. Пытаемся найти пункт, чей временной приоритет подходит под текущее время
     for (var point in _points) {
       if (point.priorityStart != null && point.priorityEnd != null &&
           point.priorityStart!.isNotEmpty && point.priorityEnd!.isNotEmpty) {
@@ -119,7 +130,6 @@ class AppState extends ChangeNotifier {
       }
     }
 
-    // 2. Если совпадений нет, ищем первый пункт без установленного приоритета
     for (var point in _points) {
       if ((point.priorityStart == null || point.priorityStart!.isEmpty) &&
           (point.priorityEnd == null || point.priorityEnd!.isEmpty)) {
@@ -127,7 +137,6 @@ class AppState extends ChangeNotifier {
       }
     }
 
-    // 3. Крайний случай: возвращаем просто первый пункт в списке
     return _points.first;
   }
 
@@ -166,11 +175,16 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void addDeparture(String pointId, String time, int stopOffset) {
+  void addDeparture(String pointId, String time, int stopOffset, String dayType) {
     final index = _points.indexWhere((p) => p.id == pointId);
     if (index != -1) {
       final list = List<Departure>.from(_points[index].departures);
-      list.add(Departure(id: DateTime.now().millisecondsSinceEpoch.toString(), time: time, stopOffsetMinutes: stopOffset));
+      list.add(Departure(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        time: time,
+        stopOffsetMinutes: stopOffset,
+        dayType: dayType,
+      ));
       list.sort((a, b) => a.time.compareTo(b.time));
       _points[index] = _points[index].copyWith(departures: list);
       _saveData();
@@ -304,6 +318,81 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 }
 
+// --- ВИДЖЕТ: ПУЛЬСИРУЮЩАЯ СВЕТОДИОДНАЯ ТОЧКА ---
+class PulsingLiveDot extends StatefulWidget {
+  const PulsingLiveDot({super.key});
+
+  @override
+  State<PulsingLiveDot> createState() => _PulsingLiveDotState();
+}
+
+class _PulsingLiveDotState extends State<PulsingLiveDot> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.3, end: 1.0).animate(_controller),
+      child: Container(
+        width: 8,
+        height: 8,
+        margin: const EdgeInsets.only(right: 6.0),
+        decoration: const BoxDecoration(
+          color: Colors.green,
+          shape: BoxShape.circle,
+        ),
+      ),
+    );
+  }
+}
+
+// --- ВИДЖЕТ: ОФОРМЛЕНИЕ ПУСТЫХ ЭКРАНОВ ---
+class EmptyStateView extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const EmptyStateView({super.key, required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Center(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 64, color: colors.onSurfaceVariant.withOpacity(0.3)),
+          const SizedBox(height: 16.0),
+          Text(
+            text,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              color: colors.onSurfaceVariant.withOpacity(0.7),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // --- ВКЛАДКА 1: РАСПИСАНИЕ ---
 class ScheduleTab extends StatefulWidget {
   const ScheduleTab({super.key});
@@ -328,17 +417,25 @@ class _ScheduleTabState extends State<ScheduleTab> {
     return DateTime(now.year, now.month, now.day, hour, minute).add(Duration(minutes: offsetMinutes));
   }
 
+  bool _isDepartureActiveToday(String dayType, int weekday) {
+    if (dayType == 'daily') return true;
+    if (dayType == 'weekdays') return weekday >= 1 && weekday <= 5;
+    if (dayType == 'weekends') return weekday >= 6 && weekday <= 7;
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
     
     if (appState.points.isEmpty) {
-      return const Center(child: Text("Нет пунктов.\nДобавьте их во вкладке «Пункты»", textAlign: TextAlign.center));
+      return const EmptyStateView(
+        icon: Icons.directions_bus_outlined,
+        text: "Нет добавленных пунктов.\nПерейдите во вкладку «Пункты», чтобы создать первый.",
+      );
     }
 
     final activePoint = appState.getActivePoint();
-    
-    // Ищем актуальный выбранный пункт по ID, чтобы избежать проблем со старыми копиями объектов
     final currentPoint = _selectedPointId != null
         ? appState.points.firstWhere((p) => p.id == _selectedPointId, orElse: () => activePoint ?? appState.points.first)
         : (activePoint ?? appState.points.first);
@@ -358,7 +455,6 @@ class _ScheduleTabState extends State<ScheduleTab> {
                   selected: isSelected,
                   onSelected: (selected) {
                     setState(() {
-                      // Повторное нажатие снимает выбор и возвращает автоматическое определение
                       _selectedPointId = selected ? point.id : null;
                     });
                   },
@@ -368,45 +464,55 @@ class _ScheduleTabState extends State<ScheduleTab> {
           ),
         ),
         Expanded(
-          child: currentPoint.departures.isEmpty
-              ? const Center(child: Text("В этом пункте нет отправлений"))
-              : StreamBuilder<DateTime>(
-                  stream: _timeStream,
-                  builder: (context, snapshot) {
-                    final now = snapshot.data ?? DateTime.now();
-                    final departures = currentPoint.departures;
-                    Departure? nearestDep;
-                    int minDiff = 999999;
+          child: StreamBuilder<DateTime>(
+            stream: _timeStream,
+            builder: (context, snapshot) {
+              final now = snapshot.data ?? DateTime.now();
+              
+              // Фильтрация рейсов по дню недели (Будни / Выходные)
+              final departures = currentPoint.departures
+                  .where((dep) => _isDepartureActiveToday(dep.dayType, now.weekday))
+                  .toList();
 
-                    for (var dep in departures) {
-                      final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
-                      final truncatedNow = DateTime(now.year, now.month, now.day, now.hour, now.minute);
-                      
-                      int diff;
-                      if (scheduledToday.isBefore(truncatedNow)) {
-                        final scheduledTomorrow = scheduledToday.add(const Duration(days: 1));
-                        diff = scheduledTomorrow.difference(truncatedNow).inMinutes;
-                      } else {
-                        diff = scheduledToday.difference(truncatedNow).inMinutes;
-                      }
+              if (departures.isEmpty) {
+                return const EmptyStateView(
+                  icon: Icons.event_busy_outlined,
+                  text: "На сегодня в этом пункте рейсов нет.",
+                );
+              }
 
-                      if (diff >= 0 && diff < minDiff) {
-                        minDiff = diff;
-                        nearestDep = dep;
-                      }
-                    }
+              Departure? nearestDep;
+              int minDiff = 999999;
 
-                    return ListView.builder(
-                      padding: const EdgeInsets.all(16.0),
-                      itemCount: departures.length,
-                      itemBuilder: (context, index) {
-                        final dep = departures[index];
-                        final isNearest = nearestDep != null && nearestDep.id == dep.id;
-                        return _buildDeparturePill(context, dep, isNearest, now, appState.fontSizeScale);
-                      },
-                    );
-                  },
-                ),
+              for (var dep in departures) {
+                final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
+                final truncatedNow = DateTime(now.year, now.month, now.day, now.hour, now.minute);
+                
+                int diff;
+                if (scheduledToday.isBefore(truncatedNow)) {
+                  final scheduledTomorrow = scheduledToday.add(const Duration(days: 1));
+                  diff = scheduledTomorrow.difference(truncatedNow).inMinutes;
+                } else {
+                  diff = scheduledToday.difference(truncatedNow).inMinutes;
+                }
+
+                if (diff >= 0 && diff < minDiff) {
+                  minDiff = diff;
+                  nearestDep = dep;
+                }
+              }
+
+              return ListView.builder(
+                padding: const EdgeInsets.all(16.0),
+                itemCount: departures.length,
+                itemBuilder: (context, index) {
+                  final dep = departures[index];
+                  final isNearest = nearestDep != null && nearestDep.id == dep.id;
+                  return _buildDeparturePill(context, dep, isNearest, now, appState.fontSizeScale);
+                },
+              );
+            },
+          ),
         ),
       ],
     );
@@ -431,6 +537,10 @@ class _ScheduleTabState extends State<ScheduleTab> {
       countdownText = hours > 0 ? "осталось: ${hours}ч ${minutes}м" : "осталось: $minutes мин";
     }
 
+    String dayTypeLabel = "";
+    if (dep.dayType == 'weekdays') dayTypeLabel = " • Будни";
+    if (dep.dayType == 'weekends') dayTypeLabel = " • Выходные";
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       margin: const EdgeInsets.symmetric(vertical: 6.0),
@@ -448,13 +558,18 @@ class _ScheduleTabState extends State<ScheduleTab> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                dep.time,
-                style: TextStyle(
-                  fontSize: (isNearest ? 28.0 : 22.0) * fontScale, 
-                  fontWeight: FontWeight.bold, 
-                  color: isNearest ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant
-                ),
+              Row(
+                children: [
+                  if (isNearest && !isPast) const PulsingLiveDot(),
+                  Text(
+                    dep.time,
+                    style: TextStyle(
+                      fontSize: (isNearest ? 28.0 : 22.0) * fontScale, 
+                      fontWeight: FontWeight.bold, 
+                      color: isNearest ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant
+                    ),
+                  ),
+                ],
               ),
               Text(
                 countdownText,
@@ -469,22 +584,23 @@ class _ScheduleTabState extends State<ScheduleTab> {
             ],
           ),
           const SizedBox(height: 4.0),
-          if (dep.stopOffsetMinutes > 0)
-            Text(
-              "на остановке в: $stopTimeStr (+${dep.stopOffsetMinutes} мин)", 
-              style: TextStyle(
-                fontSize: 14.0 * fontScale, 
-                color: isNearest ? colorScheme.onPrimaryContainer.withOpacity(0.8) : colorScheme.onSurfaceVariant.withOpacity(0.7)
-              )
-            )
-          else
-            Text(
-              "без заезда на остановку", 
-              style: TextStyle(
-                fontSize: 14.0 * fontScale, 
-                color: colorScheme.onSurfaceVariant.withOpacity(0.5)
-              )
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  dep.stopOffsetMinutes > 0
+                      ? "на остановке в: $stopTimeStr (+${dep.stopOffsetMinutes} мин)$dayTypeLabel"
+                      : "без заезда на остановку$dayTypeLabel",
+                  style: TextStyle(
+                    fontSize: 14.0 * fontScale, 
+                    color: isNearest 
+                        ? colorScheme.onPrimaryContainer.withOpacity(0.8) 
+                        : colorScheme.onSurfaceVariant.withOpacity(0.7)
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -507,7 +623,10 @@ class ManagePointsTab extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text("Управление пунктами"), centerTitle: true),
       body: appState.points.isEmpty
-          ? const Center(child: Text("Список пунктов пуст"))
+          ? const EmptyStateView(
+              icon: Icons.edit_location_alt_outlined,
+              text: "У вас нет добавленных пунктов.\nНажмите «+», чтобы создать пункт.",
+            )
           : ReorderableListView.builder(
               itemCount: appState.points.length,
               onReorder: appState.reorderPoints,
@@ -554,6 +673,7 @@ class ManagePointsTab extends StatelessWidget {
                 TextField(controller: nameController, decoration: const InputDecoration(labelText: "Название пункта")),
                 const SizedBox(height: 16.0),
                 const Text("Приоритет по времени (необязательно):", style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8.0),
                 Row(
                   children: [
                     Expanded(child: OutlinedButton(
@@ -613,6 +733,14 @@ class EditDeparturesScreen extends StatelessWidget {
   final BusPoint point;
   const EditDeparturesScreen({super.key, required this.point});
 
+  String _getDayTypeDisplay(String dayType) {
+    switch (dayType) {
+      case 'weekdays': return "По будням";
+      case 'weekends': return "По выходным";
+      default: return "Ежедневно";
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
@@ -621,7 +749,10 @@ class EditDeparturesScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(currentPoint.name)),
       body: currentPoint.departures.isEmpty
-          ? const Center(child: Text("Нет рейсов. Добавьте первый рейс кнопкой +"))
+          ? const EmptyStateView(
+              icon: Icons.more_time_outlined,
+              text: "Здесь пока нет рейсов.\nДобавьте первый рейс с помощью кнопки «+».",
+            )
           : ListView.builder(
               itemCount: currentPoint.departures.length,
               itemBuilder: (context, index) {
@@ -630,7 +761,9 @@ class EditDeparturesScreen extends StatelessWidget {
                   margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
                   child: ListTile(
                     title: Text("Отправление с АС: ${dep.time}", style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: dep.stopOffsetMinutes > 0 ? Text("Остановка через: +${dep.stopOffsetMinutes} мин") : const Text("Без остановки"),
+                    subtitle: Text(
+                      "${dep.stopOffsetMinutes > 0 ? 'Остановка: +${dep.stopOffsetMinutes} мин' : 'Без заезда'} • ${_getDayTypeDisplay(dep.dayType)}",
+                    ),
                     trailing: IconButton(
                       icon: const Icon(Icons.delete, color: Colors.red),
                       onPressed: () => context.read<AppState>().deleteDeparture(currentPoint.id, dep.id),
@@ -645,6 +778,7 @@ class EditDeparturesScreen extends StatelessWidget {
 
   void _showAddDepartureDialog(BuildContext context, String pointId) {
     String? selectedTime;
+    String selectedDayType = 'daily';
     final offsetController = TextEditingController(text: "0");
 
     showDialog(
@@ -652,25 +786,43 @@ class EditDeparturesScreen extends StatelessWidget {
       builder: (context) => StatefulBuilder(
         builder: (context, setStateDialog) => AlertDialog(
           title: const Text("Добавить рейс"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ElevatedButton.icon(
-                icon: const Icon(Icons.access_time),
-                label: Text(selectedTime != null ? "Отправление: $selectedTime" : "Выбрать время отправления"),
-                onPressed: () async {
-                  final res = await pickTime(context, selectedTime);
-                  if (res != null) setStateDialog(() => selectedTime = res);
-                },
-              ),
-              const SizedBox(height: 16.0),
-              TextField(
-                controller: offsetController,
-                decoration: const InputDecoration(labelText: "Смещение остановки (в минутах)"),
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              ),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.access_time),
+                  label: Text(selectedTime != null ? "Отправление: $selectedTime" : "Выбрать время"),
+                  onPressed: () async {
+                    final res = await pickTime(context, selectedTime);
+                    if (res != null) setStateDialog(() => selectedTime = res);
+                  },
+                ),
+                const SizedBox(height: 16.0),
+                TextField(
+                  controller: offsetController,
+                  decoration: const InputDecoration(labelText: "Смещение остановки (в минутах)"),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                ),
+                const SizedBox(height: 16.0),
+                const Text("Периодичность рейса:", style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8.0),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'daily', label: Text('Все дни'), icon: Icon(Icons.calendar_today_outlined)),
+                    ButtonSegment(value: 'weekdays', label: Text('Будни'), icon: Icon(Icons.work_outline)),
+                    ButtonSegment(value: 'weekends', label: Text('Вых.'), icon: Icon(Icons.beach_access_outlined)),
+                  ],
+                  selected: {selectedDayType},
+                  onSelectionChanged: (Set<String> newSelection) {
+                    setStateDialog(() {
+                      selectedDayType = newSelection.first;
+                    });
+                  },
+                )
+              ],
+            ),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
@@ -678,7 +830,7 @@ class EditDeparturesScreen extends StatelessWidget {
               onPressed: () {
                 final offset = int.tryParse(offsetController.text.trim()) ?? 0;
                 if (selectedTime != null) {
-                  context.read<AppState>().addDeparture(pointId, selectedTime!, offset);
+                  context.read<AppState>().addDeparture(pointId, selectedTime!, offset, selectedDayType);
                   Navigator.pop(context);
                 }
               },
@@ -694,6 +846,7 @@ class EditDeparturesScreen extends StatelessWidget {
 // --- ВКЛАДКА 3: НАСТРОЙКИ ---
 class SettingsTab extends StatelessWidget {
   const SettingsTab({super.key});
+
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
@@ -725,37 +878,116 @@ class SettingsTab extends StatelessWidget {
         ),
         const Divider(height: 32.0),
         const Text("Резервное копирование", style: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8.0),
         ElevatedButton.icon(
           onPressed: () {
-            showDialog(context: context, builder: (context) => AlertDialog(
-              title: const Text("Экспорт настроек"),
-              content: SelectableText(appState.exportToJson(), style: const TextStyle(fontFamily: 'monospace', fontSize: 12.0)),
-            ));
+            final jsonStr = appState.exportToJson();
+            showDialog(
+              context: context, 
+              builder: (context) => AlertDialog(
+                title: const Text("Экспорт настроек"),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text("JSON данные для резервного копирования:"),
+                    const SizedBox(height: 8.0),
+                    Container(
+                      maxHeight: 150,
+                      width: double.maxFinite,
+                      padding: const EdgeInsets.all(8.0),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(8.0),
+                      ),
+                      child: SingleChildScrollView(
+                        child: SelectableText(
+                          jsonStr, 
+                          style: const TextStyle(fontFamily: 'monospace', fontSize: 11.0)
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton.icon(
+                    icon: const Icon(Icons.copy),
+                    label: const Text("Скопировать в буфер"),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: jsonStr));
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Данные скопированы в буфер обмена")),
+                      );
+                    },
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context), 
+                    child: const Text("Закрыть")
+                  ),
+                ],
+              ),
+            );
           },
-          icon: const Icon(Icons.download), label: const Text("Экспорт в JSON"),
+          icon: const Icon(Icons.download), 
+          label: const Text("Экспорт в JSON"),
         ),
         ElevatedButton.icon(
           onPressed: () {
-            showDialog(context: context, builder: (context) => AlertDialog(
-              title: const Text("Импорт настроек"),
-              content: TextField(controller: jsonController, maxLines: 5),
-              actions: [
-                ElevatedButton(
-                  onPressed: () {
-                    final success = appState.importFromJson(jsonController.text.trim());
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(success ? "Данные успешно импортированы" : "Ошибка импорта. Проверьте формат JSON"),
+            showDialog(
+              context: context, 
+              builder: (context) => StatefulBuilder(
+                builder: (context, setStateDialog) => AlertDialog(
+                  title: const Text("Импорт настроек"),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: jsonController, 
+                        maxLines: 5,
+                        decoration: const InputDecoration(
+                          hintText: "Вставьте JSON код...",
+                          border: OutlineInputBorder(),
+                        ),
                       ),
-                    );
-                  },
-                  child: const Text("Импортировать"),
+                      const SizedBox(height: 8.0),
+                      TextButton.icon(
+                        icon: const Icon(Icons.paste),
+                        label: const Text("Вставить из буфера"),
+                        onPressed: () async {
+                          final data = await Clipboard.getData(Clipboard.kTextPlain);
+                          if (data != null && data.text != null) {
+                            setStateDialog(() {
+                              jsonController.text = data.text!;
+                            });
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context), 
+                      child: const Text("Отмена")
+                    ),
+                    ElevatedButton(
+                      onPressed: () {
+                        final success = appState.importFromJson(jsonController.text.trim());
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(success ? "Данные успешно импортированы" : "Ошибка импорта. Проверьте формат JSON"),
+                          ),
+                        );
+                      },
+                      child: const Text("Импортировать"),
+                    ),
+                  ],
                 ),
-              ],
-            ));
+              ),
+            );
           },
-          icon: const Icon(Icons.upload), label: const Text("Импорт из JSON"),
+          icon: const Icon(Icons.upload), 
+          label: const Text("Импорт из JSON"),
         ),
       ],
     );
