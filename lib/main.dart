@@ -10,13 +10,15 @@ class Departure {
   final String id;
   final String time;
   final int stopOffsetMinutes;
-  final String routeNumber; // Новое поле для номера/имени маршрута
+  final String routeNumber;
+  final String workingDays; // "daily", "weekdays", "weekends"
 
   Departure({
     required this.id,
     required this.time,
     required this.stopOffsetMinutes,
     this.routeNumber = "",
+    this.workingDays = "daily",
   });
 
   Map<String, dynamic> toJson() => {
@@ -24,14 +26,16 @@ class Departure {
         'time': time,
         'stopOffsetMinutes': stopOffsetMinutes,
         'routeNumber': routeNumber,
+        'workingDays': workingDays,
       };
 
   factory Departure.fromJson(Map<String, dynamic> json) {
     return Departure(
-      id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
-      time: json['time'] ?? "08:00",
-      stopOffsetMinutes: json['stopOffsetMinutes'] ?? 0,
-      routeNumber: json['routeNumber'] ?? "",
+      id: json['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
+      time: json['time']?.toString() ?? "08:00",
+      stopOffsetMinutes: (json['stopOffsetMinutes'] as num?)?.toInt() ?? 0,
+      routeNumber: json['routeNumber']?.toString() ?? "",
+      workingDays: json['workingDays']?.toString() ?? "daily",
     );
   }
 
@@ -39,12 +43,14 @@ class Departure {
     String? time,
     int? stopOffsetMinutes,
     String? routeNumber,
+    String? workingDays,
   }) {
     return Departure(
       id: this.id,
       time: time ?? this.time,
       stopOffsetMinutes: stopOffsetMinutes ?? this.stopOffsetMinutes,
       routeNumber: routeNumber ?? this.routeNumber,
+      workingDays: workingDays ?? this.workingDays,
     );
   }
 }
@@ -69,10 +75,10 @@ class BusPoint {
   factory BusPoint.fromJson(Map<String, dynamic> json) {
     var depList = json['departures'] as List? ?? [];
     return BusPoint(
-      id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
-      name: json['name'] ?? "Без названия",
-      priorityStart: json['priorityStart'],
-      priorityEnd: json['priorityEnd'],
+      id: json['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
+      name: json['name']?.toString() ?? "Без названия",
+      priorityStart: json['priorityStart']?.toString(),
+      priorityEnd: json['priorityEnd']?.toString(),
       departures: depList.map((d) => Departure.fromJson(d)).toList(),
     );
   }
@@ -93,12 +99,14 @@ class AppState extends ChangeNotifier {
   List<BusPoint> _points = [];
   ThemeMode _themeMode = ThemeMode.system;
   double _fontSizeScale = 1.0;
-  bool _hidePastDepartures = false; // Состояние автоскрытия прошедших рейсов
+  bool _hidePastDepartures = false;
+  bool _compactMode = false;
 
   List<BusPoint> get points => _points;
   ThemeMode get themeMode => _themeMode;
   double get fontSizeScale => _fontSizeScale;
   bool get hidePastDepartures => _hidePastDepartures;
+  bool get compactMode => _compactMode;
 
   AppState() { _loadData(); }
 
@@ -108,6 +116,7 @@ class AppState extends ChangeNotifier {
     _themeMode = ThemeMode.values.firstWhere((e) => e.toString().split('.').last == themeStr, orElse: () => ThemeMode.system);
     _fontSizeScale = prefs.getDouble('fontSizeScale') ?? 1.0;
     _hidePastDepartures = prefs.getBool('hidePastDepartures') ?? false;
+    _compactMode = prefs.getBool('compactMode') ?? false;
     
     final pointsJson = prefs.getString('pointsData');
     if (pointsJson != null) {
@@ -125,6 +134,7 @@ class AppState extends ChangeNotifier {
     await prefs.setString('themeMode', _themeMode.toString().split('.').last);
     await prefs.setDouble('fontSizeScale', _fontSizeScale);
     await prefs.setBool('hidePastDepartures', _hidePastDepartures);
+    await prefs.setBool('compactMode', _compactMode);
   }
 
   BusPoint? getActivePoint() {
@@ -172,7 +182,14 @@ class AppState extends ChangeNotifier {
   void updatePoint(String id, String name, String? priorityStart, String? priorityEnd) {
     final index = _points.indexWhere((p) => p.id == id);
     if (index != -1) {
-      _points[index] = _points[index].copyWith(name: name, priorityStart: priorityStart, priorityEnd: priorityEnd);
+      // Исключаем copyWith для предотвращения бага с невозможностью обнуления полей времени
+      _points[index] = BusPoint(
+        id: id,
+        name: name,
+        priorityStart: priorityStart,
+        priorityEnd: priorityEnd,
+        departures: _points[index].departures,
+      );
       _saveData();
       notifyListeners();
     }
@@ -192,7 +209,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void addDeparture(String pointId, String time, int stopOffset, String routeNumber) {
+  void addDeparture(String pointId, String time, int stopOffset, String routeNumber, String workingDays) {
     final index = _points.indexWhere((p) => p.id == pointId);
     if (index != -1) {
       final list = List<Departure>.from(_points[index].departures);
@@ -201,6 +218,7 @@ class AppState extends ChangeNotifier {
         time: time, 
         stopOffsetMinutes: stopOffset,
         routeNumber: routeNumber,
+        workingDays: workingDays,
       ));
       list.sort((a, b) => a.time.compareTo(b.time));
       _points[index] = _points[index].copyWith(departures: list);
@@ -209,7 +227,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  void updateDeparture(String pointId, String departureId, String time, int stopOffset, String routeNumber) {
+  void updateDeparture(String pointId, String departureId, String time, int stopOffset, String routeNumber, String workingDays) {
     final index = _points.indexWhere((p) => p.id == pointId);
     if (index != -1) {
       final list = List<Departure>.from(_points[index].departures);
@@ -219,6 +237,7 @@ class AppState extends ChangeNotifier {
           time: time,
           stopOffsetMinutes: stopOffset,
           routeNumber: routeNumber,
+          workingDays: workingDays,
         );
         list.sort((a, b) => a.time.compareTo(b.time));
         _points[index] = _points[index].copyWith(departures: list);
@@ -242,20 +261,23 @@ class AppState extends ChangeNotifier {
   void setThemeMode(ThemeMode mode) { _themeMode = mode; _saveData(); notifyListeners(); }
   void setFontSizeScale(double scale) { _fontSizeScale = scale; _saveData(); notifyListeners(); }
   void setHidePastDepartures(bool value) { _hidePastDepartures = value; _saveData(); notifyListeners(); }
+  void setCompactMode(bool value) { _compactMode = value; _saveData(); notifyListeners(); }
 
   String exportToJson() => jsonEncode({
     'points': _points.map((p) => p.toJson()).toList(), 
     'fontSizeScale': _fontSizeScale,
     'hidePastDepartures': _hidePastDepartures,
+    'compactMode': _compactMode,
   });
   
   bool importFromJson(String jsonStr) {
     try {
       final decoded = jsonDecode(jsonStr);
-      if (decoded['points'] != null) {
+      if (decoded is Map && decoded['points'] != null) {
         _points = (decoded['points'] as List).map((item) => BusPoint.fromJson(item)).toList();
         _fontSizeScale = (decoded['fontSizeScale'] ?? 1.0).toDouble();
         _hidePastDepartures = decoded['hidePastDepartures'] ?? false;
+        _compactMode = decoded['compactMode'] ?? false;
         _saveData();
         notifyListeners();
         return true;
@@ -369,7 +391,10 @@ class ScheduleTab extends StatefulWidget {
 
 class _ScheduleTabState extends State<ScheduleTab> {
   String? _selectedPointId;
-  String? _selectedRouteFilter; // Хранит выбранный фильтр маршрута (null - Все)
+  String? _selectedRouteFilter; 
+  String _searchQuery = "";
+  bool _isSearching = false;
+  final _searchController = TextEditingController();
   late Stream<DateTime> _timeStream;
 
   @override
@@ -378,10 +403,16 @@ class _ScheduleTabState extends State<ScheduleTab> {
     _timeStream = Stream.periodic(const Duration(seconds: 1), (_) => DateTime.now());
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   DateTime _getDepartureDateTime(String timeStr, int offsetMinutes, DateTime now) {
     final parts = timeStr.split(':');
-    final hour = int.parse(parts[0]);
-    final minute = int.parse(parts[1]);
+    final hour = parts.isNotEmpty ? (int.tryParse(parts[0]) ?? 0) : 0;
+    final minute = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
     return DateTime(now.year, now.month, now.day, hour, minute).add(Duration(minutes: offsetMinutes));
   }
 
@@ -399,7 +430,11 @@ class _ScheduleTabState extends State<ScheduleTab> {
         ? appState.points.firstWhere((p) => p.id == _selectedPointId, orElse: () => activePoint ?? appState.points.first)
         : (activePoint ?? appState.points.first);
 
-    // Получаем уникальные маршруты для построения быстрых фильтров на экране
+    // Безопасная фильтрация списка пунктов по поисковому запросу
+    final filteredPointsList = appState.points.where((p) =>
+        p.name.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
+
+    // Получаем список уникальных маршрутов для построения фильтров
     final routes = currentPoint.departures
         .map((d) => d.routeNumber.trim())
         .where((r) => r.isNotEmpty)
@@ -407,38 +442,79 @@ class _ScheduleTabState extends State<ScheduleTab> {
         .toList();
     routes.sort();
 
-    // Защита от зависания несуществующего фильтра при смене пунктов
     if (_selectedRouteFilter != null && !routes.contains(_selectedRouteFilter)) {
       _selectedRouteFilter = null;
     }
 
     return Column(
       children: [
-        // Горизонтальный список пунктов
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+        // Шапка с кнопкой поиска и списком пунктов
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4.0),
           child: Row(
-            children: appState.points.map((point) {
-              final isSelected = currentPoint.id == point.id;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8.0),
-                child: FilterChip(
-                  label: Text(point.name),
-                  selected: isSelected,
-                  onSelected: (selected) {
-                    setState(() {
-                      _selectedPointId = selected ? point.id : null;
-                      _selectedRouteFilter = null; // Сбрасываем фильтр маршрута при смене пункта
-                    });
-                  },
+            children: [
+              if (_isSearching)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: "Поиск пункта...",
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () {
+                            setState(() {
+                              _searchController.clear();
+                              _searchQuery = "";
+                              _isSearching = false;
+                            });
+                          },
+                        ),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(24.0)),
+                      ),
+                      onChanged: (val) => setState(() => _searchQuery = val.trim()),
+                    ),
+                  ),
+                )
+              else ...[
+                IconButton(
+                  icon: const Icon(Icons.search),
+                  onPressed: () => setState(() => _isSearching = true),
                 ),
-              );
-            }).toList(),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.only(right: 16.0),
+                    child: Row(
+                      children: filteredPointsList.map((point) {
+                        final isSelected = currentPoint.id == point.id;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: FilterChip(
+                            label: Text(point.name),
+                            selected: isSelected,
+                            onSelected: (selected) {
+                              setState(() {
+                                _selectedPointId = selected ? point.id : null;
+                                _selectedRouteFilter = null;
+                              });
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ]
+            ],
           ),
         ),
 
-        // Горизонтальный список маршрутов (Вариант Б) - показывается только если есть маршруты
+        // Горизонтальный список чип-фильтров по маршрутам (Вариант Б)
         if (routes.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 8.0),
@@ -486,13 +562,23 @@ class _ScheduleTabState extends State<ScheduleTab> {
                     final now = snapshot.data ?? DateTime.now();
                     final departures = currentPoint.departures;
 
-                    // 1. Фильтруем по выбранному маршруту
-                    var filteredDeps = departures;
+                    final weekday = now.weekday;
+                    final isWeekend = weekday == DateTime.saturday || weekday == DateTime.sunday;
+
+                    // 1. Фильтруем рейсы по будням и выходным дням недели
+                    final dayFilteredDeps = departures.where((dep) {
+                      if (dep.workingDays == "weekdays" && isWeekend) return false;
+                      if (dep.workingDays == "weekends" && !isWeekend) return false;
+                      return true;
+                    }).toList();
+
+                    // 2. Фильтруем рейсы по быстрому чип-выбору
+                    var filteredDeps = dayFilteredDeps;
                     if (_selectedRouteFilter != null) {
                       filteredDeps = filteredDeps.where((d) => d.routeNumber == _selectedRouteFilter).toList();
                     }
 
-                    // 2. Рассчитываем признак прошедшего времени для каждого рейса
+                    // 3. Рассчитываем временные интервалы
                     final List<MapEntry<Departure, bool>> depsWithPastStatus = [];
                     for (var dep in filteredDeps) {
                       final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
@@ -501,7 +587,7 @@ class _ScheduleTabState extends State<ScheduleTab> {
                       depsWithPastStatus.add(MapEntry(dep, isPast));
                     }
 
-                    // 3. Скрываем прошедшие рейсы, если опция включена (Вариант В)
+                    // 4. Скрываем прошедшие, если это задано настройками
                     var displayDeps = depsWithPastStatus;
                     if (appState.hidePastDepartures) {
                       displayDeps = displayDeps.where((entry) => !entry.value).toList();
@@ -511,7 +597,7 @@ class _ScheduleTabState extends State<ScheduleTab> {
                       return const Center(child: Text("Нет подходящих предстоящих рейсов"));
                     }
 
-                    // 4. Поиск ближайшего рейса среди отображаемых
+                    // 5. Определение самого близкого рейса
                     Departure? nearestDep;
                     int minDiff = 999999;
 
@@ -530,16 +616,36 @@ class _ScheduleTabState extends State<ScheduleTab> {
                       }
                     }
 
-                    return ListView.builder(
-                      padding: const EdgeInsets.all(16.0),
-                      itemCount: displayDeps.length,
-                      itemBuilder: (context, index) {
-                        final dep = displayDeps[index].key;
-                        final isPast = displayDeps[index].value;
-                        final isNearest = nearestDep != null && nearestDep.id == dep.id;
-                        return _buildDeparturePill(context, dep, isNearest, isPast, now, appState.fontSizeScale);
-                      },
-                    );
+                    // Отрисовка расписания
+                    if (appState.compactMode) {
+                      return Container(
+                        alignment: Alignment.topCenter,
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        height: 140.0 * appState.fontSizeScale,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                          itemCount: displayDeps.length,
+                          itemBuilder: (context, index) {
+                            final dep = displayDeps[index].key;
+                            final isPast = displayDeps[index].value;
+                            final isNearest = nearestDep != null && nearestDep.id == dep.id;
+                            return _buildCompactPill(context, dep, isNearest, isPast, now, appState.fontSizeScale);
+                          },
+                        ),
+                      );
+                    } else {
+                      return ListView.builder(
+                        padding: const EdgeInsets.all(16.0),
+                        itemCount: displayDeps.length,
+                        itemBuilder: (context, index) {
+                          final dep = displayDeps[index].key;
+                          final isPast = displayDeps[index].value;
+                          final isNearest = nearestDep != null && nearestDep.id == dep.id;
+                          return _buildDeparturePill(context, dep, isNearest, isPast, now, appState.fontSizeScale);
+                        },
+                      );
+                    }
                   },
                 ),
         ),
@@ -547,6 +653,7 @@ class _ScheduleTabState extends State<ScheduleTab> {
     );
   }
 
+  // Обычный список по высоте («Горочкой»)
   Widget _buildDeparturePill(BuildContext context, Departure dep, bool isNearest, bool isPast, DateTime now, double fontScale) {
     final colorScheme = Theme.of(context).colorScheme;
     final stopTimeStr = _calculateStopTime(dep.time, dep.stopOffsetMinutes);
@@ -563,91 +670,177 @@ class _ScheduleTabState extends State<ScheduleTab> {
       countdownText = hours > 0 ? "осталось: ${hours}ч ${minutes}м" : "осталось: $minutes мин";
     }
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      margin: const EdgeInsets.symmetric(vertical: 6.0),
-      decoration: BoxDecoration(
-        color: isNearest 
-            ? colorScheme.primaryContainer 
-            : (isPast ? colorScheme.surfaceVariant.withOpacity(0.4) : colorScheme.surfaceVariant),
-        borderRadius: BorderRadius.circular(isNearest ? 28.0 : 20.0),
-        border: isNearest ? Border.all(color: colorScheme.primary, width: 2.0) : null,
-      ),
-      padding: EdgeInsets.symmetric(horizontal: isNearest ? 20.0 : 16.0, vertical: isNearest ? 18.0 : 12.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  // Визуальный бейдж с номером маршрута (буквы и цифры)
-                  if (dep.routeNumber.isNotEmpty) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-                      decoration: BoxDecoration(
-                        color: isNearest ? colorScheme.primary : colorScheme.outline.withOpacity(0.3),
-                        borderRadius: BorderRadius.circular(8.0),
-                      ),
-                      child: Text(
-                        dep.routeNumber,
-                        style: TextStyle(
-                          fontSize: 13.0 * fontScale,
-                          fontWeight: FontWeight.bold,
-                          color: isNearest ? colorScheme.onPrimary : colorScheme.onSurface,
+    final double opacity = isNearest ? 1.0 : (isPast ? 0.45 : 0.85);
+    final double verticalPadding = isNearest ? 18.0 : (isPast ? 6.0 : 12.0);
+    final double fontSize = (isNearest ? 26.0 : (isPast ? 17.0 : 21.0)) * fontScale;
+
+    return Opacity(
+      opacity: opacity,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        margin: const EdgeInsets.symmetric(vertical: 6.0),
+        decoration: BoxDecoration(
+          color: isNearest 
+              ? colorScheme.primaryContainer 
+              : (isPast ? colorScheme.surfaceVariant.withOpacity(0.3) : colorScheme.surfaceVariant),
+          borderRadius: BorderRadius.circular(isNearest ? 28.0 : 16.0),
+          border: isNearest ? Border.all(color: colorScheme.primary, width: 2.0) : null,
+        ),
+        padding: EdgeInsets.symmetric(horizontal: isNearest ? 20.0 : 16.0, vertical: verticalPadding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    if (dep.routeNumber.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                        decoration: BoxDecoration(
+                          color: isNearest ? colorScheme.primary : colorScheme.outline.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
+                        child: Text(
+                          dep.routeNumber,
+                          style: TextStyle(
+                            fontSize: (isNearest ? 13.0 : 11.0) * fontScale,
+                            fontWeight: FontWeight.bold,
+                            color: isNearest ? colorScheme.onPrimary : colorScheme.onSurface,
+                          ),
                         ),
                       ),
+                      const SizedBox(width: 8.0),
+                    ],
+                    Text(
+                      dep.time,
+                      style: TextStyle(
+                        fontSize: fontSize, 
+                        fontWeight: FontWeight.bold, 
+                        color: isNearest ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant
+                      ),
                     ),
-                    const SizedBox(width: 8.0),
                   ],
-                  Text(
-                    dep.time,
-                    style: TextStyle(
-                      fontSize: (isNearest ? 28.0 : 22.0) * fontScale, 
-                      fontWeight: FontWeight.bold, 
-                      color: isNearest ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant
-                    ),
+                ),
+                Text(
+                  countdownText,
+                  style: TextStyle(
+                    fontSize: (isNearest ? 16.0 : (isPast ? 12.0 : 14.0)) * fontScale, 
+                    fontWeight: FontWeight.bold, 
+                    color: isNearest 
+                        ? colorScheme.primary 
+                        : (isPast ? Colors.grey : colorScheme.onSurfaceVariant)
                   ),
-                ],
-              ),
-              Text(
-                countdownText,
-                style: TextStyle(
-                  fontSize: (isNearest ? 16.0 : 14.0) * fontScale, 
-                  fontWeight: FontWeight.bold, 
-                  color: isNearest 
-                      ? colorScheme.primary 
-                      : (isPast ? Colors.grey : colorScheme.onSurfaceVariant)
+                ),
+              ],
+            ),
+            if (!isPast) ...[
+              const SizedBox(height: 4.0),
+              if (dep.stopOffsetMinutes > 0)
+                Text(
+                  "на остановке в: $stopTimeStr (+${dep.stopOffsetMinutes} мин)", 
+                  style: TextStyle(
+                    fontSize: 13.0 * fontScale, 
+                    color: isNearest ? colorScheme.onPrimaryContainer.withOpacity(0.8) : colorScheme.onSurfaceVariant.withOpacity(0.7)
+                  )
+                )
+              else
+                Text(
+                  "без заезда на остановку", 
+                  style: TextStyle(
+                    fontSize: 13.0 * fontScale, 
+                    color: colorScheme.onSurfaceVariant.withOpacity(0.5)
+                  )
+                ),
+            ]
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Горизонтальный штакетник
+  Widget _buildCompactPill(BuildContext context, Departure dep, bool isNearest, bool isPast, DateTime now, double fontScale) {
+    final colorScheme = Theme.of(context).colorScheme;
+    String countdownText = "";
+
+    if (isPast) {
+      countdownText = "завтра";
+    } else {
+      final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
+      final truncatedNow = DateTime(now.year, now.month, now.day, now.hour, now.minute);
+      final diffInMinutes = scheduledToday.difference(truncatedNow).inMinutes;
+      final hours = diffInMinutes ~/ 60;
+      final minutes = diffInMinutes % 60;
+      countdownText = hours > 0 ? "${hours}ч ${minutes}м" : "$minutes мин";
+    }
+
+    return Opacity(
+      opacity: isNearest ? 1.0 : (isPast ? 0.5 : 0.85),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        width: 100.0 * fontScale,
+        margin: const EdgeInsets.only(right: 8.0),
+        decoration: BoxDecoration(
+          color: isNearest 
+              ? colorScheme.primaryContainer 
+              : (isPast ? colorScheme.surfaceVariant.withOpacity(0.3) : colorScheme.surfaceVariant),
+          borderRadius: BorderRadius.circular(16.0),
+          border: isNearest ? Border.all(color: colorScheme.primary, width: 2.0) : null,
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (dep.routeNumber.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
+                margin: const EdgeInsets.bottom(4.0),
+                decoration: BoxDecoration(
+                  color: isNearest ? colorScheme.primary : colorScheme.outline.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(6.0),
+                ),
+                child: Text(
+                  dep.routeNumber,
+                  style: TextStyle(
+                    fontSize: 10.0 * fontScale,
+                    fontWeight: FontWeight.bold,
+                    color: isNearest ? colorScheme.onPrimary : colorScheme.onSurface,
+                  ),
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 4.0),
-          if (dep.stopOffsetMinutes > 0)
             Text(
-              "на остановке в: $stopTimeStr (+${dep.stopOffsetMinutes} мин)", 
+              dep.time,
               style: TextStyle(
-                fontSize: 14.0 * fontScale, 
-                color: isNearest ? colorScheme.onPrimaryContainer.withOpacity(0.8) : colorScheme.onSurfaceVariant.withOpacity(0.7)
-              )
-            )
-          else
-            Text(
-              "без заезда на остановку", 
-              style: TextStyle(
-                fontSize: 14.0 * fontScale, 
-                color: colorScheme.onSurfaceVariant.withOpacity(0.5)
-              )
+                fontSize: 18.0 * fontScale,
+                fontWeight: FontWeight.bold,
+                color: isNearest ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+              ),
             ),
-        ],
+            const SizedBox(height: 2.0),
+            Text(
+              countdownText,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11.0 * fontScale,
+                fontWeight: FontWeight.bold,
+                color: isNearest 
+                    ? colorScheme.primary 
+                    : (isPast ? Colors.grey : colorScheme.onSurfaceVariant),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   String _calculateStopTime(String timeStr, int offsetMinutes) {
     final parts = timeStr.split(':');
-    final tempDate = DateTime(2020, 1, 1, int.parse(parts[0]), int.parse(parts[1])).add(Duration(minutes: offsetMinutes));
+    final hour = parts.isNotEmpty ? (int.tryParse(parts[0]) ?? 0) : 0;
+    final minute = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
+    final tempDate = DateTime(2020, 1, 1, hour, minute).add(Duration(minutes: offsetMinutes));
     return "${tempDate.hour.toString().padLeft(2, '0')}:${tempDate.minute.toString().padLeft(2, '0')}";
   }
 }
@@ -706,7 +899,11 @@ class ManagePointsTab extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: nameController, decoration: const InputDecoration(labelText: "Название пункта")),
+                TextField(
+                  controller: nameController, 
+                  decoration: const InputDecoration(labelText: "Название пункта"),
+                  onChanged: (_) => setStateDialog(() {}), // Ребилдит диалог для управления доступностью кнопки сохранения
+                ),
                 const SizedBox(height: 16.0),
                 const Text("Приоритет по времени (необязательно):", style: TextStyle(fontWeight: FontWeight.bold)),
                 Row(
@@ -744,16 +941,14 @@ class ManagePointsTab extends StatelessWidget {
               ),
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
             ElevatedButton(
-              onPressed: () {
+              onPressed: nameController.text.trim().isEmpty ? null : () {
                 final name = nameController.text.trim();
-                if (name.isNotEmpty) {
-                  if (point == null) {
-                    context.read<AppState>().addPoint(name, startStr, endStr);
-                  } else {
-                    context.read<AppState>().updatePoint(point.id, name, startStr, endStr);
-                  }
-                  Navigator.pop(context);
+                if (point == null) {
+                  context.read<AppState>().addPoint(name, startStr, endStr);
+                } else {
+                  context.read<AppState>().updatePoint(point.id, name, startStr, endStr);
                 }
+                Navigator.pop(context);
               },
               child: const Text("Сохранить"),
             ),
@@ -781,11 +976,16 @@ class EditDeparturesScreen extends StatelessWidget {
               itemCount: currentPoint.departures.length,
               itemBuilder: (context, index) {
                 final dep = currentPoint.departures[index];
+                
+                String scheduleDaysText = "Ежедневно";
+                if (dep.workingDays == "weekdays") scheduleDaysText = "Будни";
+                if (dep.workingDays == "weekends") scheduleDaysText = "Выходные";
+
                 return Card(
                   margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
                   child: ListTile(
                     title: Text(
-                      "${dep.routeNumber.isNotEmpty ? '[${dep.routeNumber}] ' : ''}Отправление с АС: ${dep.time}", 
+                      "${dep.routeNumber.isNotEmpty ? '[${dep.routeNumber}] ' : ''}Отправление: ${dep.time} ($scheduleDaysText)", 
                       style: const TextStyle(fontWeight: FontWeight.bold)
                     ),
                     subtitle: dep.stopOffsetMinutes > 0 ? Text("Остановка через: +${dep.stopOffsetMinutes} мин") : const Text("Без остановки"),
@@ -793,7 +993,7 @@ class EditDeparturesScreen extends StatelessWidget {
                       icon: const Icon(Icons.delete, color: Colors.red),
                       onPressed: () => context.read<AppState>().deleteDeparture(currentPoint.id, dep.id),
                     ),
-                    onTap: () => _showDepartureDialog(context, currentPoint.id, dep), // Вызов диалога для редактирования
+                    onTap: () => _showDepartureDialog(context, currentPoint.id, dep),
                   ),
                 );
               },
@@ -805,9 +1005,9 @@ class EditDeparturesScreen extends StatelessWidget {
     );
   }
 
-  // Объединенный диалог для добавления и редактирования рейсов
   void _showDepartureDialog(BuildContext context, String pointId, [Departure? existingDep]) {
     String? selectedTime = existingDep?.time;
+    String selectedWorkingDays = existingDep?.workingDays ?? "daily";
     final offsetController = TextEditingController(text: existingDep?.stopOffsetMinutes.toString() ?? "0");
     final routeController = TextEditingController(text: existingDep?.routeNumber ?? "");
 
@@ -826,6 +1026,19 @@ class EditDeparturesScreen extends StatelessWidget {
                   onPressed: () async {
                     final res = await pickTime(context, selectedTime);
                     if (res != null) setStateDialog(() => selectedTime = res);
+                  },
+                ),
+                const SizedBox(height: 16.0),
+                DropdownButtonFormField<String>(
+                  value: selectedWorkingDays,
+                  decoration: const InputDecoration(labelText: "Дни работы"),
+                  items: const [
+                    DropdownMenuItem(value: "daily", child: Text("Ежедневно")),
+                    DropdownMenuItem(value: "weekdays", child: Text("По будням (Пн-Пт)")),
+                    DropdownMenuItem(value: "weekends", child: Text("По выходным (Сб-Вс)")),
+                  ],
+                  onChanged: (val) {
+                    if (val != null) setStateDialog(() => selectedWorkingDays = val);
                   },
                 ),
                 const SizedBox(height: 16.0),
@@ -850,17 +1063,15 @@ class EditDeparturesScreen extends StatelessWidget {
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
             ElevatedButton(
-              onPressed: () {
+              onPressed: selectedTime == null ? null : () { // Запрещаем нажатие при невыбранном времени
                 final offset = int.tryParse(offsetController.text.trim()) ?? 0;
                 final route = routeController.text.trim();
-                if (selectedTime != null) {
-                  if (existingDep == null) {
-                    context.read<AppState>().addDeparture(pointId, selectedTime!, offset, route);
-                  } else {
-                    context.read<AppState>().updateDeparture(pointId, existingDep.id, selectedTime!, offset, route);
-                  }
-                  Navigator.pop(context);
+                if (existingDep == null) {
+                  context.read<AppState>().addDeparture(pointId, selectedTime!, offset, route, selectedWorkingDays);
+                } else {
+                  context.read<AppState>().updateDeparture(pointId, existingDep.id, selectedTime!, offset, route, selectedWorkingDays);
                 }
+                Navigator.pop(context);
               },
               child: Text(existingDep == null ? "Добавить" : "Сохранить"),
             ),
@@ -910,6 +1121,12 @@ class SettingsTab extends StatelessWidget {
           subtitle: const Text("Оставляет в списке только предстоящие рейсы, автоматически убирая прошедшие до завтрашнего дня"),
           value: appState.hidePastDepartures,
           onChanged: (val) => appState.setHidePastDepartures(val),
+        ),
+        SwitchListTile(
+          title: const Text("Компактный штакетник"),
+          subtitle: const Text("Отображает список рейсов в виде компактных вертикальных пилюль с горизонтальной прокруткой"),
+          value: appState.compactMode,
+          onChanged: (val) => appState.setCompactMode(val),
         ),
         const Divider(height: 32.0),
         const Text("Резервное копирование", style: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold)),
