@@ -182,7 +182,6 @@ class AppState extends ChangeNotifier {
   void updatePoint(String id, String name, String? priorityStart, String? priorityEnd) {
     final index = _points.indexWhere((p) => p.id == id);
     if (index != -1) {
-      // Исключаем copyWith для предотвращения бага с невозможностью обнуления полей времени
       _points[index] = BusPoint(
         id: id,
         name: name,
@@ -796,7 +795,7 @@ class _ScheduleTabState extends State<ScheduleTab> {
             if (dep.routeNumber.isNotEmpty)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
-                margin: const EdgeInsets.bottom(4.0),
+                margin: const EdgeInsets.only(bottom: 4.0), // Конструктор EdgeInsets.only использован корректно
                 decoration: BoxDecoration(
                   color: isNearest ? colorScheme.primary : colorScheme.outline.withOpacity(0.3),
                   borderRadius: BorderRadius.circular(6.0),
@@ -902,7 +901,7 @@ class ManagePointsTab extends StatelessWidget {
                 TextField(
                   controller: nameController, 
                   decoration: const InputDecoration(labelText: "Название пункта"),
-                  onChanged: (_) => setStateDialog(() {}), // Ребилдит диалог для управления доступностью кнопки сохранения
+                  onChanged: (_) => setStateDialog(() {}), 
                 ),
                 const SizedBox(height: 16.0),
                 const Text("Приоритет по времени (необязательно):", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -1063,7 +1062,7 @@ class EditDeparturesScreen extends StatelessWidget {
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
             ElevatedButton(
-              onPressed: selectedTime == null ? null : () { // Запрещаем нажатие при невыбранном времени
+              onPressed: selectedTime == null ? null : () { 
                 final offset = int.tryParse(offsetController.text.trim()) ?? 0;
                 final route = routeController.text.trim();
                 if (existingDep == null) {
