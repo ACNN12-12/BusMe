@@ -103,8 +103,10 @@ class AppState extends ChangeNotifier {
     final now = DateTime.now();
     final currentMinutes = now.hour * 60 + now.minute;
 
+    // 1. Пытаемся найти пункт, чей временной приоритет подходит под текущее время
     for (var point in _points) {
-      if (point.priorityStart != null && point.priorityEnd != null) {
+      if (point.priorityStart != null && point.priorityEnd != null &&
+          point.priorityStart!.isNotEmpty && point.priorityEnd!.isNotEmpty) {
         final start = _parseTimeToMinutes(point.priorityStart!);
         final end = _parseTimeToMinutes(point.priorityEnd!);
         if (start != null && end != null) {
@@ -116,6 +118,16 @@ class AppState extends ChangeNotifier {
         }
       }
     }
+
+    // 2. Если совпадений нет, ищем первый пункт без установленного приоритета
+    for (var point in _points) {
+      if ((point.priorityStart == null || point.priorityStart!.isEmpty) &&
+          (point.priorityEnd == null || point.priorityEnd!.isEmpty)) {
+        return point;
+      }
+    }
+
+    // 3. Крайний случай: возвращаем просто первый пункт в списке
     return _points.first;
   }
 
@@ -187,7 +199,7 @@ class AppState extends ChangeNotifier {
       final decoded = jsonDecode(jsonStr);
       if (decoded['points'] != null) {
         _points = (decoded['points'] as List).map((item) => BusPoint.fromJson(item)).toList();
-        _fontSizeScale = decoded['fontSizeScale'] ?? 1.0;
+        _fontSizeScale = (decoded['fontSizeScale'] ?? 1.0).toDouble();
         _saveData();
         notifyListeners();
         return true;
@@ -202,14 +214,15 @@ Future<String?> pickTime(BuildContext context, String? initialTimeStr) async {
   TimeOfDay initialTime = TimeOfDay.now();
   if (initialTimeStr != null && initialTimeStr.contains(':')) {
     final parts = initialTimeStr.split(':');
-    initialTime = TimeOfDay(hour: int.tryParse(parts[0]) ?? 0, minute: int.tryParse(parts[1]) ?? 0);
+    if (parts.length == 2) {
+      initialTime = TimeOfDay(hour: int.tryParse(parts[0]) ?? 0, minute: int.tryParse(parts[1]) ?? 0);
+    }
   }
   
   final TimeOfDay? picked = await showTimePicker(
     context: context,
     initialTime: initialTime,
     builder: (context, child) {
-      // Принудительно ставим 24-часовой формат для кружочка
       return MediaQuery(
         data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
         child: child!,
@@ -238,8 +251,6 @@ class BusMeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
-    
-    // Красивый лавандовый цвет по умолчанию
     const Color defaultLavender = Color(0xFF8C71DF);
 
     return DynamicColorBuilder(
@@ -247,7 +258,6 @@ class BusMeApp extends StatelessWidget {
         ColorScheme lightScheme;
         ColorScheme darkScheme;
 
-        // Если телефон поддерживает Monet - берем системные цвета, иначе Лаванду
         if (lightDynamic != null && darkDynamic != null) {
           lightScheme = lightDynamic.harmonized();
           darkScheme = darkDynamic.harmonized();
@@ -300,8 +310,9 @@ class ScheduleTab extends StatefulWidget {
   @override
   State<ScheduleTab> createState() => _ScheduleTabState();
 }
+
 class _ScheduleTabState extends State<ScheduleTab> {
-  BusPoint? _selectedPoint;
+  String? _selectedPointId;
   late Stream<DateTime> _timeStream;
 
   @override
@@ -310,15 +321,27 @@ class _ScheduleTabState extends State<ScheduleTab> {
     _timeStream = Stream.periodic(const Duration(seconds: 1), (_) => DateTime.now());
   }
 
+  DateTime _getDepartureDateTime(String timeStr, int offsetMinutes, DateTime now) {
+    final parts = timeStr.split(':');
+    final hour = int.parse(parts[0]);
+    final minute = int.parse(parts[1]);
+    return DateTime(now.year, now.month, now.day, hour, minute).add(Duration(minutes: offsetMinutes));
+  }
+
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
-    final activePoint = appState.getActivePoint();
-    final currentPoint = _selectedPoint ?? activePoint;
-
+    
     if (appState.points.isEmpty) {
       return const Center(child: Text("Нет пунктов.\nДобавьте их во вкладке «Пункты»", textAlign: TextAlign.center));
     }
+
+    final activePoint = appState.getActivePoint();
+    
+    // Ищем актуальный выбранный пункт по ID, чтобы избежать проблем со старыми копиями объектов
+    final currentPoint = _selectedPointId != null
+        ? appState.points.firstWhere((p) => p.id == _selectedPointId, orElse: () => activePoint ?? appState.points.first)
+        : (activePoint ?? appState.points.first);
 
     return Column(
       children: [
@@ -327,20 +350,25 @@ class _ScheduleTabState extends State<ScheduleTab> {
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
           child: Row(
             children: appState.points.map((point) {
-              final isSelected = currentPoint?.id == point.id;
+              final isSelected = currentPoint.id == point.id;
               return Padding(
                 padding: const EdgeInsets.only(right: 8.0),
                 child: FilterChip(
                   label: Text(point.name),
                   selected: isSelected,
-                  onSelected: (val) => setState(() => _selectedPoint = point),
+                  onSelected: (selected) {
+                    setState(() {
+                      // Повторное нажатие снимает выбор и возвращает автоматическое определение
+                      _selectedPointId = selected ? point.id : null;
+                    });
+                  },
                 ),
               );
             }).toList(),
           ),
         ),
         Expanded(
-          child: currentPoint == null || currentPoint.departures.isEmpty
+          child: currentPoint.departures.isEmpty
               ? const Center(child: Text("В этом пункте нет отправлений"))
               : StreamBuilder<DateTime>(
                   stream: _timeStream,
@@ -351,8 +379,17 @@ class _ScheduleTabState extends State<ScheduleTab> {
                     int minDiff = 999999;
 
                     for (var dep in departures) {
-                      final depTime = _getDateTimeFromTimeStr(dep.time, dep.stopOffsetMinutes, now);
-                      final diff = depTime.difference(now).inMinutes;
+                      final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
+                      final truncatedNow = DateTime(now.year, now.month, now.day, now.hour, now.minute);
+                      
+                      int diff;
+                      if (scheduledToday.isBefore(truncatedNow)) {
+                        final scheduledTomorrow = scheduledToday.add(const Duration(days: 1));
+                        diff = scheduledTomorrow.difference(truncatedNow).inMinutes;
+                      } else {
+                        diff = scheduledToday.difference(truncatedNow).inMinutes;
+                      }
+
                       if (diff >= 0 && diff < minDiff) {
                         minDiff = diff;
                         nearestDep = dep;
@@ -378,14 +415,17 @@ class _ScheduleTabState extends State<ScheduleTab> {
   Widget _buildDeparturePill(BuildContext context, Departure dep, bool isNearest, DateTime now, double fontScale) {
     final colorScheme = Theme.of(context).colorScheme;
     final stopTimeStr = _calculateStopTime(dep.time, dep.stopOffsetMinutes);
-    final stopDateTime = _getDateTimeFromTimeStr(dep.time, dep.stopOffsetMinutes, now);
-    final diffInMinutes = stopDateTime.difference(now).inMinutes;
+    
+    final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
+    final truncatedNow = DateTime(now.year, now.month, now.day, now.hour, now.minute);
+    
+    final bool isPast = scheduledToday.isBefore(truncatedNow);
     String countdownText = "";
-    bool isPast = diffInMinutes < 0;
 
     if (isPast) {
       countdownText = "завтра в: ${dep.time}";
     } else {
+      final diffInMinutes = scheduledToday.difference(truncatedNow).inMinutes;
       final hours = diffInMinutes ~/ 60;
       final minutes = diffInMinutes % 60;
       countdownText = hours > 0 ? "осталось: ${hours}ч ${minutes}м" : "осталось: $minutes мин";
@@ -395,7 +435,9 @@ class _ScheduleTabState extends State<ScheduleTab> {
       duration: const Duration(milliseconds: 300),
       margin: const EdgeInsets.symmetric(vertical: 6.0),
       decoration: BoxDecoration(
-        color: isNearest ? colorScheme.primaryContainer : (isPast ? colorScheme.surfaceVariant.withOpacity(0.4) : colorScheme.surfaceVariant),
+        color: isNearest 
+            ? colorScheme.primaryContainer 
+            : (isPast ? colorScheme.surfaceVariant.withOpacity(0.4) : colorScheme.surfaceVariant),
         borderRadius: BorderRadius.circular(isNearest ? 28.0 : 20.0),
         border: isNearest ? Border.all(color: colorScheme.primary, width: 2.0) : null,
       ),
@@ -408,29 +450,44 @@ class _ScheduleTabState extends State<ScheduleTab> {
             children: [
               Text(
                 dep.time,
-                style: TextStyle(fontSize: (isNearest ? 28.0 : 22.0) * fontScale, fontWeight: FontWeight.bold, color: isNearest ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant),
+                style: TextStyle(
+                  fontSize: (isNearest ? 28.0 : 22.0) * fontScale, 
+                  fontWeight: FontWeight.bold, 
+                  color: isNearest ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant
+                ),
               ),
               Text(
                 countdownText,
-                style: TextStyle(fontSize: (isNearest ? 16.0 : 14.0) * fontScale, fontWeight: FontWeight.bold, color: isNearest ? colorScheme.primary : (isPast ? Colors.grey : colorScheme.onSurfaceVariant)),
+                style: TextStyle(
+                  fontSize: (isNearest ? 16.0 : 14.0) * fontScale, 
+                  fontWeight: FontWeight.bold, 
+                  color: isNearest 
+                      ? colorScheme.primary 
+                      : (isPast ? Colors.grey : colorScheme.onSurfaceVariant)
+                ),
               ),
             ],
           ),
           const SizedBox(height: 4.0),
           if (dep.stopOffsetMinutes > 0)
-            Text("на остановке в: $stopTimeStr (+${dep.stopOffsetMinutes} мин)", style: TextStyle(fontSize: 14.0 * fontScale, color: isNearest ? colorScheme.onPrimaryContainer.withOpacity(0.8) : colorScheme.onSurfaceVariant.withOpacity(0.7)))
+            Text(
+              "на остановке в: $stopTimeStr (+${dep.stopOffsetMinutes} мин)", 
+              style: TextStyle(
+                fontSize: 14.0 * fontScale, 
+                color: isNearest ? colorScheme.onPrimaryContainer.withOpacity(0.8) : colorScheme.onSurfaceVariant.withOpacity(0.7)
+              )
+            )
           else
-            Text("без заезда на остановку", style: TextStyle(fontSize: 14.0 * fontScale, color: colorScheme.onSurfaceVariant.withOpacity(0.5))),
+            Text(
+              "без заезда на остановку", 
+              style: TextStyle(
+                fontSize: 14.0 * fontScale, 
+                color: colorScheme.onSurfaceVariant.withOpacity(0.5)
+              )
+            ),
         ],
       ),
     );
-  }
-
-  DateTime _getDateTimeFromTimeStr(String timeStr, int offsetMinutes, DateTime now) {
-    final parts = timeStr.split(':');
-    var date = DateTime(now.year, now.month, now.day, int.parse(parts[0]), int.parse(parts[1])).add(Duration(minutes: offsetMinutes));
-    if (date.isBefore(now)) date = date.add(const Duration(days: 1));
-    return date;
   }
 
   String _calculateStopTime(String timeStr, int offsetMinutes) {
@@ -461,7 +518,9 @@ class ManagePointsTab extends StatelessWidget {
                   margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
                   child: ListTile(
                     title: Text(point.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: point.priorityStart != null ? Text("Приоритет: с ${point.priorityStart} до ${point.priorityEnd}") : const Text("Без временного приоритета"),
+                    subtitle: point.priorityStart != null && point.priorityStart!.isNotEmpty
+                        ? Text("Приоритет: с ${point.priorityStart} до ${point.priorityEnd}")
+                        : const Text("Без временного приоритета"),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -502,7 +561,7 @@ class ManagePointsTab extends StatelessWidget {
                         final res = await pickTime(context, startStr);
                         if (res != null) setStateDialog(() => startStr = res);
                       },
-                      child: Text(startStr != null ? "С $startStr" : "С (выбрать)"),
+                      child: Text(startStr != null && startStr!.isNotEmpty ? "С $startStr" : "С (выбрать)"),
                     )),
                     const SizedBox(width: 8.0),
                     Expanded(child: OutlinedButton(
@@ -510,11 +569,11 @@ class ManagePointsTab extends StatelessWidget {
                         final res = await pickTime(context, endStr);
                         if (res != null) setStateDialog(() => endStr = res);
                       },
-                      child: Text(endStr != null ? "До $endStr" : "До (выбрать)"),
+                      child: Text(endStr != null && endStr!.isNotEmpty ? "До $endStr" : "До (выбрать)"),
                     )),
                   ],
                 ),
-                if (startStr != null || endStr != null)
+                if ((startStr != null && startStr!.isNotEmpty) || (endStr != null && endStr!.isNotEmpty))
                   TextButton(
                     onPressed: () => setStateDialog(() { startStr = null; endStr = null; }),
                     child: const Text("Очистить время", style: TextStyle(color: Colors.red)),
@@ -605,7 +664,6 @@ class EditDeparturesScreen extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 16.0),
-              // Защита от ввода букв (разрешены только цифры)
               TextField(
                 controller: offsetController,
                 decoration: const InputDecoration(labelText: "Смещение остановки (в минутах)"),
@@ -684,8 +742,13 @@ class SettingsTab extends StatelessWidget {
               actions: [
                 ElevatedButton(
                   onPressed: () {
-                    appState.importFromJson(jsonController.text.trim());
+                    final success = appState.importFromJson(jsonController.text.trim());
                     Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success ? "Данные успешно импортированы" : "Ошибка импорта. Проверьте формат JSON"),
+                      ),
+                    );
                   },
                   child: const Text("Импортировать"),
                 ),
