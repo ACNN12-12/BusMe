@@ -182,6 +182,7 @@ class AppState extends ChangeNotifier {
   void updatePoint(String id, String name, String? priorityStart, String? priorityEnd) {
     final index = _points.indexWhere((p) => p.id == id);
     if (index != -1) {
+      // Исключаем copyWith для предотвращения бага с невозможностью обнуления полей времени
       _points[index] = BusPoint(
         id: id,
         name: name,
@@ -322,6 +323,181 @@ void main() {
   );
 }
 
+
+ThemeData buildExpressiveTheme(ColorScheme scheme) {
+  final base = ThemeData(
+    useMaterial3: true,
+    colorScheme: scheme,
+  );
+
+  return base.copyWith(
+    scaffoldBackgroundColor: scheme.surface,
+    visualDensity: VisualDensity.standard,
+    appBarTheme: AppBarTheme(
+      centerTitle: false,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      backgroundColor: Colors.transparent,
+      foregroundColor: scheme.onSurface,
+      titleTextStyle: base.textTheme.headlineSmall?.copyWith(
+        color: scheme.onSurface,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.5,
+      ),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      height: 74,
+      elevation: 0,
+      backgroundColor: scheme.surfaceContainer,
+      indicatorColor: scheme.secondaryContainer,
+      labelTextStyle: WidgetStateProperty.resolveWith((states) {
+        final selected = states.contains(WidgetState.selected);
+        return base.textTheme.labelMedium?.copyWith(
+          fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+          color: selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant,
+        );
+      }),
+      iconTheme: WidgetStateProperty.resolveWith((states) {
+        final selected = states.contains(WidgetState.selected);
+        return IconThemeData(
+          size: selected ? 26 : 23,
+          color: selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant,
+        );
+      }),
+    ),
+    cardTheme: CardThemeData(
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      color: scheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(28),
+      ),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: scheme.surfaceContainerHighest.withOpacity(.62),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(24),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(24),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(24),
+        borderSide: BorderSide(color: scheme.primary, width: 2),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+    ),
+    chipTheme: base.chipTheme.copyWith(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      side: BorderSide.none,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      selectedColor: scheme.secondaryContainer,
+      backgroundColor: scheme.surfaceContainerHigh,
+      labelStyle: base.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+    ),
+    floatingActionButtonTheme: FloatingActionButtonThemeData(
+      elevation: 0,
+      highlightElevation: 0,
+      backgroundColor: scheme.primaryContainer,
+      foregroundColor: scheme.onPrimaryContainer,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        textStyle: base.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ),
+    ),
+    dividerTheme: DividerThemeData(
+      color: scheme.outlineVariant.withOpacity(.55),
+      thickness: 1,
+      space: 32,
+    ),
+  );
+}
+
+class _ExpressiveSection extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final IconData icon;
+  final Widget child;
+
+  const _ExpressiveSection({
+    required this.title,
+    required this.icon,
+    required this.child,
+    this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(30),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: scheme.tertiaryContainer,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(icon, color: scheme.onTertiaryContainer),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -.35,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
 class BusMeApp extends StatelessWidget {
   const BusMeApp({super.key});
 
@@ -346,8 +522,8 @@ class BusMeApp extends StatelessWidget {
         return MaterialApp(
           title: 'BusMe',
           themeMode: appState.themeMode,
-          theme: ThemeData(useMaterial3: true, colorScheme: lightScheme),
-          darkTheme: ThemeData(useMaterial3: true, colorScheme: darkScheme),
+          theme: buildExpressiveTheme(lightScheme),
+          darkTheme: buildExpressiveTheme(darkScheme),
           home: const MainNavigationScreen(),
         );
       },
@@ -367,14 +543,34 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   Widget build(BuildContext context) {
     final screens = [const ScheduleTab(), const ManagePointsTab(), const SettingsTab()];
     return Scaffold(
-      body: SafeArea(child: screens[_currentIndex]),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 260),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        child: SafeArea(
+          key: ValueKey(_currentIndex),
+          child: screens[_currentIndex],
+        ),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) => setState(() => _currentIndex = index),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.schedule), label: 'Расписание'),
-          NavigationDestination(icon: Icon(Icons.edit_road), label: 'Пункты'),
-          NavigationDestination(icon: Icon(Icons.settings), label: 'Настройки'),
+          NavigationDestination(
+            icon: Icon(Icons.schedule_outlined),
+            selectedIcon: Icon(Icons.schedule_rounded),
+            label: 'Расписание',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.alt_route_outlined),
+            selectedIcon: Icon(Icons.alt_route_rounded),
+            label: 'Пункты',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.tune_outlined),
+            selectedIcon: Icon(Icons.tune_rounded),
+            label: 'Настройки',
+          ),
         ],
       ),
     );
@@ -420,7 +616,20 @@ class _ScheduleTabState extends State<ScheduleTab> {
     final appState = context.watch<AppState>();
     
     if (appState.points.isEmpty) {
-      return const Center(child: Text("Нет пунктов.\nДобавьте их во вкладке «Пункты»", textAlign: TextAlign.center));
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: _ExpressiveSection(
+            title: "Пока нет пунктов",
+            subtitle: "Создайте первый пункт, а затем добавьте в него рейсы.",
+            icon: Icons.route_rounded,
+            child: Text(
+              "Откройте вкладку «Пункты» внизу экрана.",
+              style: Theme.of(context).textTheme.bodyLarge,
+            ),
+          ),
+        ),
+      );
     }
 
     final activePoint = appState.getActivePoint();
@@ -473,7 +682,7 @@ class _ScheduleTabState extends State<ScheduleTab> {
                         ),
                         isDense: true,
                         contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(24.0)),
+                        border: InputBorder.none,
                       ),
                       onChanged: (val) => setState(() => _searchQuery = val.trim()),
                     ),
@@ -653,106 +862,142 @@ class _ScheduleTabState extends State<ScheduleTab> {
   }
 
   // Обычный список по высоте («Горочкой»)
-  Widget _buildDeparturePill(BuildContext context, Departure dep, bool isNearest, bool isPast, DateTime now, double fontScale) {
-    final colorScheme = Theme.of(context).colorScheme;
+  Widget _buildDeparturePill(
+    BuildContext context,
+    Departure dep,
+    bool isNearest,
+    bool isPast,
+    DateTime now,
+    double fontScale,
+  ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final stopTimeStr = _calculateStopTime(dep.time, dep.stopOffsetMinutes);
-    String countdownText = "";
 
+    String countdownText;
     if (isPast) {
-      countdownText = "завтра в: ${dep.time}";
+      countdownText = "Ушёл сегодня";
     } else {
       final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
       final truncatedNow = DateTime(now.year, now.month, now.day, now.hour, now.minute);
       final diffInMinutes = scheduledToday.difference(truncatedNow).inMinutes;
       final hours = diffInMinutes ~/ 60;
       final minutes = diffInMinutes % 60;
-      countdownText = hours > 0 ? "осталось: ${hours}ч ${minutes}м" : "осталось: $minutes мин";
+      countdownText = hours > 0 ? "Через ${hours} ч ${minutes} мин" : "Через $minutes мин";
     }
 
-    final double opacity = isNearest ? 1.0 : (isPast ? 0.45 : 0.85);
-    final double verticalPadding = isNearest ? 18.0 : (isPast ? 6.0 : 12.0);
-    final double fontSize = (isNearest ? 26.0 : (isPast ? 17.0 : 21.0)) * fontScale;
+    final background = isNearest
+        ? colorScheme.primaryContainer
+        : isPast
+            ? colorScheme.surfaceContainerLow
+            : colorScheme.surfaceContainerHigh;
 
-    return Opacity(
-      opacity: opacity,
+    final foreground = isNearest
+        ? colorScheme.onPrimaryContainer
+        : colorScheme.onSurface;
+
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 220),
+      opacity: isPast ? .48 : 1,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        margin: const EdgeInsets.symmetric(vertical: 6.0),
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: EdgeInsets.all(isNearest ? 22 : 18),
         decoration: BoxDecoration(
-          color: isNearest 
-              ? colorScheme.primaryContainer 
-              : (isPast ? colorScheme.surfaceVariant.withOpacity(0.3) : colorScheme.surfaceVariant),
-          borderRadius: BorderRadius.circular(isNearest ? 28.0 : 16.0),
-          border: isNearest ? Border.all(color: colorScheme.primary, width: 2.0) : null,
+          color: background,
+          borderRadius: BorderRadius.circular(isNearest ? 34 : 26),
         ),
-        padding: EdgeInsets.symmetric(horizontal: isNearest ? 20.0 : 16.0, vertical: verticalPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    if (dep.routeNumber.isNotEmpty) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-                        decoration: BoxDecoration(
-                          color: isNearest ? colorScheme.primary : colorScheme.outline.withOpacity(0.3),
-                          borderRadius: BorderRadius.circular(8.0),
+            Container(
+              width: isNearest ? 72 : 62,
+              height: isNearest ? 72 : 62,
+              decoration: BoxDecoration(
+                color: isNearest
+                    ? colorScheme.primary
+                    : colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(isNearest ? 26 : 22),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                dep.routeNumber.isEmpty ? "•" : dep.routeNumber,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: isNearest
+                      ? colorScheme.onPrimary
+                      : colorScheme.onSecondaryContainer,
+                  fontWeight: FontWeight.w900,
+                  fontSize: (isNearest ? 22 : 18) * fontScale,
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        dep.time,
+                        style: theme.textTheme.headlineMedium?.copyWith(
+                          color: foreground,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -1,
+                          fontSize: (isNearest ? 34 : 28) * fontScale,
                         ),
-                        child: Text(
-                          dep.routeNumber,
-                          style: TextStyle(
-                            fontSize: (isNearest ? 13.0 : 11.0) * fontScale,
-                            fontWeight: FontWeight.bold,
-                            color: isNearest ? colorScheme.onPrimary : colorScheme.onSurface,
+                      ),
+                      if (isNearest) ...[
+                        const SizedBox(width: 8),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 5),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: colorScheme.primary,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              "БЛИЖАЙШИЙ",
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: colorScheme.onPrimary,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: .6,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8.0),
+                      ],
                     ],
-                    Text(
-                      dep.time,
-                      style: TextStyle(
-                        fontSize: fontSize, 
-                        fontWeight: FontWeight.bold, 
-                        color: isNearest ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant
-                      ),
-                    ),
-                  ],
-                ),
-                Text(
-                  countdownText,
-                  style: TextStyle(
-                    fontSize: (isNearest ? 16.0 : (isPast ? 12.0 : 14.0)) * fontScale, 
-                    fontWeight: FontWeight.bold, 
-                    color: isNearest 
-                        ? colorScheme.primary 
-                        : (isPast ? Colors.grey : colorScheme.onSurfaceVariant)
                   ),
-                ),
-              ],
+                  const SizedBox(height: 4),
+                  Text(
+                    countdownText,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: isNearest ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    dep.stopOffsetMinutes > 0
+                        ? "На остановке в $stopTimeStr · +${dep.stopOffsetMinutes} мин"
+                        : "Без заезда на дополнительную остановку",
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: foreground.withOpacity(.72),
+                    ),
+                  ),
+                ],
+              ),
             ),
-            if (!isPast) ...[
-              const SizedBox(height: 4.0),
-              if (dep.stopOffsetMinutes > 0)
-                Text(
-                  "на остановке в: $stopTimeStr (+${dep.stopOffsetMinutes} мин)", 
-                  style: TextStyle(
-                    fontSize: 13.0 * fontScale, 
-                    color: isNearest ? colorScheme.onPrimaryContainer.withOpacity(0.8) : colorScheme.onSurfaceVariant.withOpacity(0.7)
-                  )
-                )
-              else
-                Text(
-                  "без заезда на остановку", 
-                  style: TextStyle(
-                    fontSize: 13.0 * fontScale, 
-                    color: colorScheme.onSurfaceVariant.withOpacity(0.5)
-                  )
-                ),
-            ]
+            Icon(
+              isNearest ? Icons.arrow_forward_rounded : Icons.chevron_right_rounded,
+              color: isNearest ? colorScheme.primary : colorScheme.onSurfaceVariant,
+            ),
           ],
         ),
       ),
@@ -760,12 +1005,20 @@ class _ScheduleTabState extends State<ScheduleTab> {
   }
 
   // Горизонтальный штакетник
-  Widget _buildCompactPill(BuildContext context, Departure dep, bool isNearest, bool isPast, DateTime now, double fontScale) {
-    final colorScheme = Theme.of(context).colorScheme;
-    String countdownText = "";
+  Widget _buildCompactPill(
+    BuildContext context,
+    Departure dep,
+    bool isNearest,
+    bool isPast,
+    DateTime now,
+    double fontScale,
+  ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
+    String countdownText;
     if (isPast) {
-      countdownText = "завтра";
+      countdownText = "ушёл";
     } else {
       final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
       final truncatedNow = DateTime(now.year, now.month, now.day, now.hour, now.minute);
@@ -775,58 +1028,52 @@ class _ScheduleTabState extends State<ScheduleTab> {
       countdownText = hours > 0 ? "${hours}ч ${minutes}м" : "$minutes мин";
     }
 
-    return Opacity(
-      opacity: isNearest ? 1.0 : (isPast ? 0.5 : 0.85),
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 220),
+      opacity: isPast ? .45 : 1,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        width: 100.0 * fontScale,
-        margin: const EdgeInsets.only(right: 8.0),
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+        width: (isNearest ? 132 : 116) * fontScale,
+        margin: const EdgeInsets.only(right: 10),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: isNearest 
-              ? colorScheme.primaryContainer 
-              : (isPast ? colorScheme.surfaceVariant.withOpacity(0.3) : colorScheme.surfaceVariant),
-          borderRadius: BorderRadius.circular(16.0),
-          border: isNearest ? Border.all(color: colorScheme.primary, width: 2.0) : null,
+          color: isNearest
+              ? colorScheme.primaryContainer
+              : colorScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(isNearest ? 32 : 26),
         ),
-        padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            if (dep.routeNumber.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
-                margin: const EdgeInsets.only(bottom: 4.0), // Конструктор EdgeInsets.only использован корректно
-                decoration: BoxDecoration(
-                  color: isNearest ? colorScheme.primary : colorScheme.outline.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(6.0),
-                ),
-                child: Text(
-                  dep.routeNumber,
-                  style: TextStyle(
-                    fontSize: 10.0 * fontScale,
-                    fontWeight: FontWeight.bold,
-                    color: isNearest ? colorScheme.onPrimary : colorScheme.onSurface,
-                  ),
-                ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+              decoration: BoxDecoration(
+                color: isNearest ? colorScheme.primary : colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(999),
               ),
-            Text(
-              dep.time,
-              style: TextStyle(
-                fontSize: 18.0 * fontScale,
-                fontWeight: FontWeight.bold,
-                color: isNearest ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+              child: Text(
+                dep.routeNumber.isEmpty ? "Рейс" : dep.routeNumber,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: isNearest ? colorScheme.onPrimary : colorScheme.onSecondaryContainer,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ),
-            const SizedBox(height: 2.0),
+            Text(
+              dep.time,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                letterSpacing: -.8,
+                fontSize: 24 * fontScale,
+              ),
+            ),
             Text(
               countdownText,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 11.0 * fontScale,
-                fontWeight: FontWeight.bold,
-                color: isNearest 
-                    ? colorScheme.primary 
-                    : (isPast ? Colors.grey : colorScheme.onSurfaceVariant),
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: isNearest ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ],
@@ -852,7 +1099,7 @@ class ManagePointsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
     return Scaffold(
-      appBar: AppBar(title: const Text("Управление пунктами"), centerTitle: true),
+      appBar: AppBar(title: const Text("Пункты и маршруты")),
       body: appState.points.isEmpty
           ? const Center(child: Text("Список пунктов пуст"))
           : ReorderableListView.builder(
@@ -862,7 +1109,7 @@ class ManagePointsTab extends StatelessWidget {
                 final point = appState.points[index];
                 return Card(
                   key: ValueKey(point.id),
-                  margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+                  margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 7.0),
                   child: ListTile(
                     title: Text(point.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                     subtitle: point.priorityStart != null && point.priorityStart!.isNotEmpty
@@ -880,7 +1127,11 @@ class ManagePointsTab extends StatelessWidget {
                 );
               },
             ),
-      floatingActionButton: FloatingActionButton(onPressed: () => _showPointDialog(context, null), child: const Icon(Icons.add)),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showPointDialog(context, null),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text("Добавить пункт"),
+      ),
     );
   }
 
@@ -901,7 +1152,7 @@ class ManagePointsTab extends StatelessWidget {
                 TextField(
                   controller: nameController, 
                   decoration: const InputDecoration(labelText: "Название пункта"),
-                  onChanged: (_) => setStateDialog(() {}), 
+                  onChanged: (_) => setStateDialog(() {}), // Ребилдит диалог для управления доступностью кнопки сохранения
                 ),
                 const SizedBox(height: 16.0),
                 const Text("Приоритет по времени (необязательно):", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -927,7 +1178,7 @@ class ManagePointsTab extends StatelessWidget {
                 if ((startStr != null && startStr!.isNotEmpty) || (endStr != null && endStr!.isNotEmpty))
                   TextButton(
                     onPressed: () => setStateDialog(() { startStr = null; endStr = null; }),
-                    child: const Text("Очистить время", style: TextStyle(color: Colors.red)),
+                    child: Text("Очистить время", style: TextStyle(color: Theme.of(context).colorScheme.error)),
                   )
               ],
             ),
@@ -936,7 +1187,7 @@ class ManagePointsTab extends StatelessWidget {
             if (point != null)
               TextButton(
                 onPressed: () { context.read<AppState>().deletePoint(point.id); Navigator.pop(context); },
-                child: const Text("Удалить", style: TextStyle(color: Colors.red)),
+                child: Text("Удалить", style: TextStyle(color: Theme.of(context).colorScheme.error)),
               ),
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
             ElevatedButton(
@@ -989,7 +1240,7 @@ class EditDeparturesScreen extends StatelessWidget {
                     ),
                     subtitle: dep.stopOffsetMinutes > 0 ? Text("Остановка через: +${dep.stopOffsetMinutes} мин") : const Text("Без остановки"),
                     trailing: IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.red),
+                      icon: Icon(Icons.delete_outline_rounded, color: Theme.of(context).colorScheme.error),
                       onPressed: () => context.read<AppState>().deleteDeparture(currentPoint.id, dep.id),
                     ),
                     onTap: () => _showDepartureDialog(context, currentPoint.id, dep),
@@ -997,9 +1248,10 @@ class EditDeparturesScreen extends StatelessWidget {
                 );
               },
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showDepartureDialog(context, currentPoint.id, null), 
-        child: const Icon(Icons.add)
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showDepartureDialog(context, currentPoint.id, null),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text("Добавить рейс"),
       ),
     );
   }
@@ -1062,7 +1314,7 @@ class EditDeparturesScreen extends StatelessWidget {
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
             ElevatedButton(
-              onPressed: selectedTime == null ? null : () { 
+              onPressed: selectedTime == null ? null : () { // Запрещаем нажатие при невыбранном времени
                 final offset = int.tryParse(offsetController.text.trim()) ?? 0;
                 final route = routeController.text.trim();
                 if (existingDep == null) {
@@ -1084,82 +1336,179 @@ class EditDeparturesScreen extends StatelessWidget {
 // --- ВКЛАДКА 3: НАСТРОЙКИ ---
 class SettingsTab extends StatelessWidget {
   const SettingsTab({super.key});
+
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
     final jsonController = TextEditingController();
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     return ListView(
-      padding: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
       children: [
-        const Text("Внешний вид", style: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold)),
-        ListTile(
-          title: const Text("Тема оформления"),
-          trailing: DropdownButton<ThemeMode>(
-            value: appState.themeMode,
-            onChanged: (newMode) { if (newMode != null) appState.setThemeMode(newMode); },
-            items: const [
-              DropdownMenuItem(value: ThemeMode.system, child: Text("Системная")),
-              DropdownMenuItem(value: ThemeMode.light, child: Text("Светлая")),
-              DropdownMenuItem(value: ThemeMode.dark, child: Text("Тёмная")),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(6, 6, 6, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Настройки",
+                style: theme.textTheme.headlineLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -1,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                "Подстройте расписание под себя",
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
             ],
           ),
         ),
-        ListTile(
-          title: const Text("Размер текста интерфейса"),
-          subtitle: Slider(
-            value: appState.fontSizeScale, min: 0.8, max: 1.4, divisions: 6,
-            label: "${(appState.fontSizeScale * 100).round()}%",
-            onChanged: (val) => appState.setFontSizeScale(val),
+        _ExpressiveSection(
+          title: "Внешний вид",
+          subtitle: "Тема и масштаб интерфейса",
+          icon: Icons.palette_outlined,
+          child: Column(
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text("Тема оформления"),
+                subtitle: const Text("Следовать системе или выбрать вручную"),
+                trailing: DropdownButton<ThemeMode>(
+                  value: appState.themeMode,
+                  underline: const SizedBox.shrink(),
+                  onChanged: (newMode) {
+                    if (newMode != null) appState.setThemeMode(newMode);
+                  },
+                  items: const [
+                    DropdownMenuItem(value: ThemeMode.system, child: Text("Системная")),
+                    DropdownMenuItem(value: ThemeMode.light, child: Text("Светлая")),
+                    DropdownMenuItem(value: ThemeMode.dark, child: Text("Тёмная")),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Размер интерфейса · ${(appState.fontSizeScale * 100).round()}%",
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                ),
+              ),
+              Slider(
+                value: appState.fontSizeScale,
+                min: 0.8,
+                max: 1.4,
+                divisions: 6,
+                label: "${(appState.fontSizeScale * 100).round()}%",
+                onChanged: appState.setFontSizeScale,
+              ),
+            ],
           ),
         ),
-        const Divider(height: 32.0),
-        const Text("Поведение расписания", style: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold)),
-        SwitchListTile(
-          title: const Text("Скрывать ушедшие рейсы"),
-          subtitle: const Text("Оставляет в списке только предстоящие рейсы, автоматически убирая прошедшие до завтрашнего дня"),
-          value: appState.hidePastDepartures,
-          onChanged: (val) => appState.setHidePastDepartures(val),
+        const SizedBox(height: 14),
+        _ExpressiveSection(
+          title: "Расписание",
+          subtitle: "Как показывать рейсы на главном экране",
+          icon: Icons.view_agenda_outlined,
+          child: Column(
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text("Скрывать ушедшие рейсы"),
+                subtitle: const Text("Показывать только актуальные отправления"),
+                value: appState.hidePastDepartures,
+                onChanged: appState.setHidePastDepartures,
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text("Компактные карточки"),
+                subtitle: const Text("Горизонтальная лента вместо большого списка"),
+                value: appState.compactMode,
+                onChanged: appState.setCompactMode,
+              ),
+            ],
+          ),
         ),
-        SwitchListTile(
-          title: const Text("Компактный штакетник"),
-          subtitle: const Text("Отображает список рейсов в виде компактных вертикальных пилюль с горизонтальной прокруткой"),
-          value: appState.compactMode,
-          onChanged: (val) => appState.setCompactMode(val),
-        ),
-        const Divider(height: 32.0),
-        const Text("Резервное копирование", style: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold)),
-        ElevatedButton.icon(
-          onPressed: () {
-            showDialog(context: context, builder: (context) => AlertDialog(
-              title: const Text("Экспорт настроек"),
-              content: SelectableText(appState.exportToJson(), style: const TextStyle(fontFamily: 'monospace', fontSize: 12.0)),
-            ));
-          },
-          icon: const Icon(Icons.download), label: const Text("Экспорт в JSON"),
-        ),
-        ElevatedButton.icon(
-          onPressed: () {
-            showDialog(context: context, builder: (context) => AlertDialog(
-              title: const Text("Импорт настроек"),
-              content: TextField(controller: jsonController, maxLines: 5),
-              actions: [
-                ElevatedButton(
-                  onPressed: () {
-                    final success = appState.importFromJson(jsonController.text.trim());
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(success ? "Данные успешно импортированы" : "Ошибка импорта. Проверьте формат JSON"),
+        const SizedBox(height: 14),
+        _ExpressiveSection(
+          title: "Резервная копия",
+          subtitle: "Перенос данных между устройствами",
+          icon: Icons.cloud_sync_outlined,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text("Экспорт настроек"),
+                      content: SelectableText(
+                        appState.exportToJson(),
+                        style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
                       ),
-                    );
-                  },
-                  child: const Text("Импортировать"),
-                ),
-              ],
-            ));
-          },
-          icon: const Icon(Icons.upload), label: const Text("Импорт из JSON"),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text("Готово"),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.download_rounded),
+                label: const Text("Экспортировать JSON"),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text("Импорт настроек"),
+                      content: TextField(
+                        controller: jsonController,
+                        maxLines: 6,
+                        decoration: const InputDecoration(
+                          hintText: "Вставьте JSON сюда",
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text("Отмена"),
+                        ),
+                        FilledButton(
+                          onPressed: () {
+                            final success = appState.importFromJson(jsonController.text.trim());
+                            Navigator.pop(context);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  success
+                                      ? "Данные успешно импортированы"
+                                      : "Ошибка импорта. Проверьте формат JSON",
+                                ),
+                              ),
+                            );
+                          },
+                          child: const Text("Импортировать"),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.upload_rounded),
+                label: const Text("Импортировать JSON"),
+              ),
+            ],
+          ),
         ),
       ],
     );
