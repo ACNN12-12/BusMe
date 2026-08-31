@@ -182,7 +182,6 @@ class AppState extends ChangeNotifier {
   void updatePoint(String id, String name, String? priorityStart, String? priorityEnd) {
     final index = _points.indexWhere((p) => p.id == id);
     if (index != -1) {
-      // Исключаем copyWith для предотвращения бага с невозможностью обнуления полей времени
       _points[index] = BusPoint(
         id: id,
         name: name,
@@ -323,6 +322,13 @@ void main() {
   );
 }
 
+// Поддержка контейнеров ColorScheme для версий Flutter до 3.22.0
+extension ColorSchemeContainerFallback on ColorScheme {
+  Color get surfaceContainer => Color.alphaBlend(onSurface.withOpacity(0.08), surface);
+  Color get surfaceContainerLow => Color.alphaBlend(onSurface.withOpacity(0.05), surface);
+  Color get surfaceContainerHigh => Color.alphaBlend(onSurface.withOpacity(0.12), surface);
+  Color get surfaceContainerHighest => surfaceVariant;
+}
 
 ThemeData buildExpressiveTheme(ColorScheme scheme) {
   final base = ThemeData(
@@ -350,22 +356,22 @@ ThemeData buildExpressiveTheme(ColorScheme scheme) {
       elevation: 0,
       backgroundColor: scheme.surfaceContainer,
       indicatorColor: scheme.secondaryContainer,
-      labelTextStyle: WidgetStateProperty.resolveWith((states) {
-        final selected = states.contains(WidgetState.selected);
+      labelTextStyle: MaterialStateProperty.resolveWith((states) {
+        final selected = states.contains(MaterialState.selected);
         return base.textTheme.labelMedium?.copyWith(
           fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
           color: selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant,
         );
       }),
-      iconTheme: WidgetStateProperty.resolveWith((states) {
-        final selected = states.contains(WidgetState.selected);
+      iconTheme: MaterialStateProperty.resolveWith((states) {
+        final selected = states.contains(MaterialState.selected);
         return IconThemeData(
           size: selected ? 26 : 23,
           color: selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant,
         );
       }),
     ),
-    cardTheme: CardThemeData(
+    cardTheme: CardTheme(
       elevation: 0,
       margin: EdgeInsets.zero,
       color: scheme.surfaceContainerLow,
@@ -638,11 +644,9 @@ class _ScheduleTabState extends State<ScheduleTab> {
         ? appState.points.firstWhere((p) => p.id == _selectedPointId, orElse: () => activePoint ?? appState.points.first)
         : (activePoint ?? appState.points.first);
 
-    // Безопасная фильтрация списка пунктов по поисковому запросу
     final filteredPointsList = appState.points.where((p) =>
         p.name.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
 
-    // Получаем список уникальных маршрутов для построения фильтров
     final routes = currentPoint.departures
         .map((d) => d.routeNumber.trim())
         .where((r) => r.isNotEmpty)
@@ -656,7 +660,6 @@ class _ScheduleTabState extends State<ScheduleTab> {
 
     return Column(
       children: [
-        // Шапка с кнопкой поиска и списком пунктов
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 4.0),
           child: Row(
@@ -722,7 +725,6 @@ class _ScheduleTabState extends State<ScheduleTab> {
           ),
         ),
 
-        // Горизонтальный список чип-фильтров по маршрутам (Вариант Б)
         if (routes.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 8.0),
@@ -760,7 +762,6 @@ class _ScheduleTabState extends State<ScheduleTab> {
             ),
           ),
 
-        // Список рейсов
         Expanded(
           child: currentPoint.departures.isEmpty
               ? const Center(child: Text("В этом пункте нет отправлений"))
@@ -773,20 +774,17 @@ class _ScheduleTabState extends State<ScheduleTab> {
                     final weekday = now.weekday;
                     final isWeekend = weekday == DateTime.saturday || weekday == DateTime.sunday;
 
-                    // 1. Фильтруем рейсы по будням и выходным дням недели
                     final dayFilteredDeps = departures.where((dep) {
                       if (dep.workingDays == "weekdays" && isWeekend) return false;
                       if (dep.workingDays == "weekends" && !isWeekend) return false;
                       return true;
                     }).toList();
 
-                    // 2. Фильтруем рейсы по быстрому чип-выбору
                     var filteredDeps = dayFilteredDeps;
                     if (_selectedRouteFilter != null) {
                       filteredDeps = filteredDeps.where((d) => d.routeNumber == _selectedRouteFilter).toList();
                     }
 
-                    // 3. Рассчитываем временные интервалы
                     final List<MapEntry<Departure, bool>> depsWithPastStatus = [];
                     for (var dep in filteredDeps) {
                       final scheduledToday = _getDepartureDateTime(dep.time, dep.stopOffsetMinutes, now);
@@ -795,7 +793,6 @@ class _ScheduleTabState extends State<ScheduleTab> {
                       depsWithPastStatus.add(MapEntry(dep, isPast));
                     }
 
-                    // 4. Скрываем прошедшие, если это задано настройками
                     var displayDeps = depsWithPastStatus;
                     if (appState.hidePastDepartures) {
                       displayDeps = displayDeps.where((entry) => !entry.value).toList();
@@ -805,7 +802,6 @@ class _ScheduleTabState extends State<ScheduleTab> {
                       return const Center(child: Text("Нет подходящих предстоящих рейсов"));
                     }
 
-                    // 5. Определение самого близкого рейса
                     Departure? nearestDep;
                     int minDiff = 999999;
 
@@ -824,7 +820,6 @@ class _ScheduleTabState extends State<ScheduleTab> {
                       }
                     }
 
-                    // Отрисовка расписания
                     if (appState.compactMode) {
                       return Container(
                         alignment: Alignment.topCenter,
@@ -861,7 +856,6 @@ class _ScheduleTabState extends State<ScheduleTab> {
     );
   }
 
-  // Обычный список по высоте («Горочкой»)
   Widget _buildDeparturePill(
     BuildContext context,
     Departure dep,
@@ -1004,7 +998,6 @@ class _ScheduleTabState extends State<ScheduleTab> {
     );
   }
 
-  // Горизонтальный штакетник
   Widget _buildCompactPill(
     BuildContext context,
     Departure dep,
@@ -1152,7 +1145,7 @@ class ManagePointsTab extends StatelessWidget {
                 TextField(
                   controller: nameController, 
                   decoration: const InputDecoration(labelText: "Название пункта"),
-                  onChanged: (_) => setStateDialog(() {}), // Ребилдит диалог для управления доступностью кнопки сохранения
+                  onChanged: (_) => setStateDialog(() {}),
                 ),
                 const SizedBox(height: 16.0),
                 const Text("Приоритет по времени (необязательно):", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -1314,7 +1307,7 @@ class EditDeparturesScreen extends StatelessWidget {
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
             ElevatedButton(
-              onPressed: selectedTime == null ? null : () { // Запрещаем нажатие при невыбранном времени
+              onPressed: selectedTime == null ? null : () {
                 final offset = int.tryParse(offsetController.text.trim()) ?? 0;
                 final route = routeController.text.trim();
                 if (existingDep == null) {
