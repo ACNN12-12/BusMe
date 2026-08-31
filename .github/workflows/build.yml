@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+  pull_request: # Это запустит сборку автоматически для вашего пулл-реквеста
 
 jobs:
   build:
