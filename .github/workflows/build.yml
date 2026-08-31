@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+  workflow_dispatch: # Позволяет запускать сборку вручную для любой ветки
 
 jobs:
   build:
